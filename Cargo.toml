@@ -1,0 +1,14 @@
+[package]
+name = "markdoc"
+version = "0.1.0"
+authors = ["Ryan Paul <rpaul@stripe.com>"]
+description = "An experimental Markdoc tokenizer written in Rust"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+pest = "2.0"
+pest_derive = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+pulldown-cmark = { path = "../pulldown-cmark", features = ["serde", "simd"] }

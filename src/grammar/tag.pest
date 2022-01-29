@@ -1,0 +1,127 @@
+
+Top = _{
+  "{%" ~ 
+  Space* ~
+  ( Value | Annotation | TagOpen | TagClose)  ~
+  Space* ~
+  "%}"
+}
+
+TagOpen = {
+  Identifier ~
+  Space* ~
+  Primary? ~
+  Space* ~
+  Attributes* ~
+  "/"?
+}
+
+TagClose = { "/" ~ Identifier }
+
+Annotation = { Attributes }
+
+Primary = { Value }
+
+Attributes = { ((Attribute | Shortcut) ~ Space*)+ }
+
+Attribute = { Identifier ~ "=" ~ Value }
+
+Shortcut = { ShortcutSigil ~ Identifier }
+
+ShortcutSigil = { "#" | "." }
+
+Value = _{
+  ValueNull |
+  ValueBoolean |
+  ValueNumber |
+  ValueStringWrapper | 
+  ValueArray |
+  ValueHash |
+  Variable |
+  Function
+}
+
+Function = {
+  Identifier ~
+  "(" ~
+  Space* ~
+  (
+    FunctionParameter ~
+    (Space* ~ "," ~ Space* ~ FunctionParameter)*
+  )? ~
+  ")"
+}
+
+FunctionParameter = _{ Attribute | Value }
+
+Variable = {
+  ("$" | "@") ~
+  Identifier ~
+  (
+    ("." ~ Identifier) |
+    ("[" ~
+      (
+        ValueNumber |
+        ValueStringWrapper |
+        Variable
+      ) ~
+    "]")
+  )*
+}
+
+ValueNull = { "null" }
+
+ValueBoolean = { "true" | "false" }
+
+ValueArray = {
+  "[" ~
+  Space* ~
+  (
+    Value ~
+    (Space* ~ "," ~ Space* ~ Value)*
+  )? ~
+  ","? ~
+  Space* ~
+  "]"
+}
+
+ValueHash = {
+  "{" ~
+  Space* ~
+  (
+    ValueHashItem ~
+    (Space* ~ "," ~ Space* ~ ValueHashItem)*
+  )? ~
+  Space* ~
+  ","? ~
+  "}"
+}
+
+ValueHashItem = ${
+  (
+    ValueStringWrapper | Identifier
+  ) ~
+  ":" ~ Space* ~ Value
+}
+
+ValueNumber = {
+  "-"? ~
+  ASCII_DIGIT+ ~
+  ("." ~ ASCII_DIGIT+)?
+}
+
+ValueStringWrapper = _{ "\"" ~ ValueString ~ "\"" }
+
+ValueString = @{ ValueStringChars* }
+
+ValueStringChars = {
+  (!("\"" | "\\") ~ ANY) |
+  ("\\" ~ ("\"" | "\\"))
+}
+
+Identifier = {
+  ASCII_ALPHA ~
+  (ASCII_ALPHANUMERIC | "-" | "_")* 
+}
+
+Space = _{ " " | "\n" | "\t" }
