@@ -91,7 +91,7 @@ impl From<markdown::Event<'_>> for Token {
   }
 }
 
-fn convert_attributes(event: markdown::Event) -> Option<Attributes> {
+pub fn convert_attributes(event: markdown::Event) -> Option<Attributes> {
   use markdown::CodeBlockKind::*;
   use markdown::Event::*;
   use markdown::Tag::*;

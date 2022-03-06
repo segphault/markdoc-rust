@@ -113,7 +113,7 @@ fn convert_attributes(pair: Pair<Rule>) -> Attributes {
 fn convert_value(pair: Pair<Rule>) -> Value {
   match pair.as_rule() {
     Rule::Variable => Value::Variable(
-      pair.as_str().chars().nth(0).unwrap(),
+      pair.as_str().chars().next().unwrap(),
       pair.into_inner().map(convert_value).collect(),
     ),
     Rule::Function => convert_function(pair),
@@ -400,9 +400,3 @@ mod tests {
     )
   }
 }
-
-// badges=[\"Client-side\" ]
-// (
-//   "badges".to_string(),
-//   Value::Array(vec![Value::String("Client-side".to_string())])
-// )

@@ -1,6 +1,8 @@
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 pub type Attributes = HashMap<String, Value>;
 
@@ -81,10 +83,7 @@ pub enum Type {
 impl Type {
   pub fn has_inline(&self) -> bool {
     use Type::*;
-    match self {
-      Paragraph | Heading | Item | TableCell => true,
-      _ => false,
-    }
+    matches!(self, Paragraph | Heading | Item | TableCell)
   }
 
   pub fn is_inline(&self) -> bool {
@@ -120,4 +119,23 @@ pub enum Token {
   Error {
     message: String,
   },
+}
+
+#[derive(PartialEq, Debug, Serialize)]
+#[serde(tag = "$$mdtype")]
+pub struct Node {
+  #[serde(rename = "type")]
+  pub kind: Type,
+  pub attributes: Option<Attributes>,
+  pub children: Vec<Rc<RefCell<Node>>>,
+}
+
+impl Node {
+  pub fn new(kind: Type, attributes: Option<Attributes>) -> Self {
+    Node {
+      kind,
+      attributes,
+      children: Vec::new(),
+    }
+  }
 }
