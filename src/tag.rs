@@ -4,7 +4,7 @@ use pest::iterators::Pair;
 use pest::{Parser, RuleType};
 
 #[derive(Parser)]
-#[grammar = "grammar/tag.pest"]
+#[grammar = "tag.pest"]
 struct TagParser;
 
 #[derive(PartialEq, Debug)]

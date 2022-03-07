@@ -1,14 +1,31 @@
-use crate::model::{Node, Token, Type};
+use crate::model::{Attributes, Node, Token, Type, Value};
 use crate::tokenize::tokenize;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+fn extract_frontmatter(input: &str) -> (&str, Option<Attributes>) {
+  match input
+    .strip_prefix("---")
+    .and_then(|left| left.split_once("---"))
+  {
+    Some((frontmatter, text)) => (
+      text,
+      Some(Attributes::from([(
+        "frontmatter".into(),
+        Value::String(frontmatter.into()),
+      )])),
+    ),
+    None => (input, None),
+  }
+}
+
 pub fn parse(input: &str) -> Rc<RefCell<Node>> {
-  let root = Rc::new(RefCell::new(Node::new(Type::Document, None)));
+  let (source, attrs)  = extract_frontmatter(input);
+  let root = Rc::new(RefCell::new(Node::new(Type::Document, attrs)));
   let mut nodes = vec![root.clone()];
   let mut inline: Option<Rc<RefCell<Node>>> = None;
 
-  for token in tokenize(input) {
+  for token in tokenize(source) {
     match token {
       Token::Open { kind, attributes } => {
         let node = Rc::new(RefCell::new(Node::new(kind, attributes)));
