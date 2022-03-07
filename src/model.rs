@@ -1,4 +1,4 @@
-use serde::ser::SerializeMap;
+use serde::ser::{SerializeMap, SerializeStruct};
 use serde::{Serialize, Serializer};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -21,7 +21,7 @@ pub enum Value {
   Null,
 }
 
-fn serialize_variable<S>(ch: &char, path: &Vec<Value>, s: S) -> Result<S::Ok, S::Error>
+fn serialize_variable<S>(ch: &char, path: &[Value], s: S) -> Result<S::Ok, S::Error>
 where
   S: Serializer,
 {
@@ -32,7 +32,7 @@ where
   map.end()
 }
 
-fn serialize_function<S>(name: &String, attrs: &Attributes, s: S) -> Result<S::Ok, S::Error>
+fn serialize_function<S>(name: &str, attrs: &Attributes, s: S) -> Result<S::Ok, S::Error>
 where
   S: Serializer,
 {
@@ -121,10 +121,8 @@ pub enum Token {
   },
 }
 
-#[derive(PartialEq, Debug, Serialize)]
-#[serde(tag = "$$mdtype")]
+#[derive(PartialEq, Debug)]
 pub struct Node {
-  #[serde(rename = "type")]
   pub kind: Type,
   pub attributes: Option<Attributes>,
   pub children: Vec<Rc<RefCell<Node>>>,
@@ -137,5 +135,28 @@ impl Node {
       attributes,
       children: Vec::new(),
     }
+  }
+}
+
+impl Serialize for Node {
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+
+    let mut state = serializer.serialize_struct("Node", 5)?;
+    state.serialize_field("$$mdtype", "Node")?;
+    state.serialize_field("type", &self.kind)?;
+    state.serialize_field("children", &self.children)?;
+    state.serialize_field("inline", &self.kind.is_inline())?;
+
+    if let Some(attrs) = &self.attributes {
+      state.serialize_field("attributes", &attrs)?;
+    }
+    else {
+      state.serialize_field("attributes", &Attributes::new())?;
+    }
+
+    state.end()
   }
 }
