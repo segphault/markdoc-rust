@@ -129,11 +129,7 @@ pub fn convert_attributes(event: markdown::Event) -> Option<Attributes> {
       ])),
       _ => None,
     },
-    Text(text) => Some(HashMap::from([(
-      String::from("content"),
-      Value::String(text.to_string()),
-    )])),
-    Code(text) => Some(HashMap::from([(
+    Text(text) | Code(text) => Some(HashMap::from([(
       String::from("content"),
       Value::String(text.to_string()),
     )])),

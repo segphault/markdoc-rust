@@ -121,6 +121,16 @@ pub enum Token {
   },
 }
 
+impl Token {
+  pub fn is_inline(&self) -> bool {
+    use Token::*;
+    match self {
+      Open { kind, .. } | Append { kind, .. } | Close { kind } => kind.is_inline(),
+      _ => false,
+    }
+  }
+}
+
 #[derive(PartialEq, Debug)]
 pub struct Node {
   pub kind: Type,
@@ -143,7 +153,6 @@ impl Serialize for Node {
   where
     S: Serializer,
   {
-
     let mut state = serializer.serialize_struct("Node", 5)?;
     state.serialize_field("$$mdtype", "Node")?;
     state.serialize_field("type", &self.kind)?;
@@ -152,8 +161,7 @@ impl Serialize for Node {
 
     if let Some(attrs) = &self.attributes {
       state.serialize_field("attributes", &attrs)?;
-    }
-    else {
+    } else {
       state.serialize_field("attributes", &Attributes::new())?;
     }
 
