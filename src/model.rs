@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 pub type Attributes = HashMap<String, Value>;
 
-#[derive(PartialEq, Debug, Serialize)]
+#[derive(PartialEq, Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum Value {
   Hash(Attributes),
@@ -144,6 +144,28 @@ impl Node {
       kind,
       attributes,
       children: Vec::new(),
+    }
+  }
+
+  pub fn attribute(&self, key: &str) -> Option<&Value> {
+    self.attributes.as_ref().and_then(|x| x.get(key))
+  }
+
+  pub fn set_attributes(&mut self, attrs: Attributes) {
+    if let Some(attributes) = &mut self.attributes {
+      attributes.extend(attrs)
+    } else {
+      self.attributes = Some(attrs)
+    }
+  }
+
+  pub fn set_attribute(&mut self, key: &str, value: Value) -> Option<Value> {
+    match &mut self.attributes {
+      Some(attrs) => attrs.insert(key.into(), value),
+      None => {
+        self.attributes = Some(Attributes::from([(key.into(), value)]));
+        None
+      }
     }
   }
 }

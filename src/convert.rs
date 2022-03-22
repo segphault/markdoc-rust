@@ -91,6 +91,19 @@ impl From<markdown::Event<'_>> for Token {
   }
 }
 
+fn convert_fenced_info(info: &str) -> Option<Attributes> {
+  if let Some(start) = info.find("{%") {
+    if let Some(end) = markdown::scan_markdoc_tag_end(info[start..].as_bytes()) {
+      if let Tag::Annotation(mut attrs) = Tag::from(&info[start..(start + end)]) {
+        attrs.insert("language".into(), Value::String(info[..start].trim().to_string()));
+        return Some(attrs)
+      }
+    }
+  }
+
+  None
+}
+
 pub fn convert_attributes(event: markdown::Event) -> Option<Attributes> {
   use markdown::CodeBlockKind::*;
   use markdown::Event::*;
@@ -103,10 +116,7 @@ pub fn convert_attributes(event: markdown::Event) -> Option<Attributes> {
         Value::Number(level as u8 as f64),
       )])),
       CodeBlock(kind) => match kind {
-        Fenced(info) => Some(HashMap::from([(
-          String::from("language"),
-          Value::String(info.to_string()),
-        )])),
+        Fenced(info) => convert_fenced_info(&info.to_string()),
         Indented => None,
       },
       List(ordered) => match ordered {
@@ -119,14 +129,22 @@ pub fn convert_attributes(event: markdown::Event) -> Option<Attributes> {
           Value::Boolean(false),
         )])),
       },
-      Link(_, link, title) => Some(HashMap::from([
-        (String::from("href"), Value::String(link.to_string())),
-        (String::from("title"), Value::String(title.to_string())),
-      ])),
-      Image(_, link, title) => Some(HashMap::from([
-        (String::from("src"), Value::String(link.to_string())),
-        (String::from("title"), Value::String(title.to_string())),
-      ])),
+      Link(_, link, title) => Some(if title.is_empty() {
+        HashMap::from([(String::from("href"), Value::String(link.to_string()))])
+      } else {
+        HashMap::from([
+          (String::from("href"), Value::String(link.to_string())),
+          (String::from("title"), Value::String(title.to_string())),
+        ])
+      }),
+      Image(_, link, title) => Some(if title.is_empty() {
+        HashMap::from([(String::from("src"), Value::String(link.to_string()))])
+      } else {
+        HashMap::from([
+          (String::from("src"), Value::String(link.to_string())),
+          (String::from("title"), Value::String(title.to_string())),
+        ])
+      }),
       _ => None,
     },
     Text(text) | Code(text) => Some(HashMap::from([(
