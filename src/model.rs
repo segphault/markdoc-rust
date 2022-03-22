@@ -1,3 +1,4 @@
+use crate::markdown::CowStr;
 use serde::ser::{SerializeMap, SerializeStruct};
 use serde::{Serialize, Serializer};
 use std::cell::RefCell;
@@ -19,6 +20,54 @@ pub enum Value {
   #[serde(serialize_with = "serialize_function")]
   Function(String, Attributes),
   Null,
+}
+
+impl From<&str> for Value {
+  fn from(value: &str) -> Value {
+    Value::String(value.into())
+  }
+}
+
+impl From<CowStr<'_>> for Value {
+  fn from(value: CowStr) -> Value {
+    Value::String(value.to_string())
+  }
+}
+
+impl From<bool> for Value {
+  fn from(value: bool) -> Value {
+    Value::Boolean(value)
+  }
+}
+
+impl From<i32> for Value {
+  fn from(value: i32) -> Value {
+    Value::Number(value.into())
+  }
+}
+
+impl From<u64> for Value {
+  fn from(value: u64) -> Value {
+    Value::Number(value as f64)
+  }
+}
+
+impl From<u8> for Value {
+  fn from(value: u8) -> Value {
+    Value::Number(value as f64)
+  }
+}
+
+impl From<Vec<Value>> for Value {
+  fn from(value: Vec<Value>) -> Value {
+    Value::Array(value)
+  }
+}
+
+impl<const N: usize> From<[(&str, Value); N]> for Value {
+  fn from(value: [(&str, Value); N]) -> Value {
+    Value::Hash(value.map(|(k, v)| (k.into(), v)).into())
+  }
 }
 
 fn serialize_variable<S>(ch: &char, path: &[Value], s: S) -> Result<S::Ok, S::Error>
@@ -135,7 +184,7 @@ impl Token {
 pub struct Node {
   pub kind: Type,
   pub attributes: Option<Attributes>,
-  pub children: Vec<Rc<RefCell<Node>>>,
+  pub children: Vec<NodeRef>,
 }
 
 impl Node {
@@ -167,6 +216,14 @@ impl Node {
         None
       }
     }
+  }
+}
+
+pub type NodeRef = Rc<RefCell<Node>>;
+
+impl From<Node> for NodeRef {
+  fn from(value: Node) -> NodeRef {
+    Rc::new(RefCell::new(value))
   }
 }
 

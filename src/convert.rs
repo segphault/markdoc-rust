@@ -1,7 +1,6 @@
 use crate::markdown;
-use crate::model::{Attributes, Token, Type, Value};
+use crate::model::{Attributes, Token, Type};
 use crate::tag::Tag;
-use std::collections::HashMap;
 
 impl<'a> From<&'a markdown::Event<'a>> for Type {
   fn from(event: &'a markdown::Event<'a>) -> Type {
@@ -73,7 +72,7 @@ impl From<markdown::Event<'_>> for Token {
           },
           Tag::Value(variable) => Token::Append {
             kind: Type::Text,
-            attributes: Some(Attributes::from([(String::from("content"), variable)])),
+            attributes: Some([("content".into(), variable)].into()),
           },
           Tag::Annotation(attributes) => Token::Annotate {
             attributes: Some(attributes),
@@ -95,8 +94,8 @@ fn convert_fenced_info(info: &str) -> Option<Attributes> {
   if let Some(start) = info.find("{%") {
     if let Some(end) = markdown::scan_markdoc_tag_end(info[start..].as_bytes()) {
       if let Tag::Annotation(mut attrs) = Tag::from(&info[start..(start + end)]) {
-        attrs.insert("language".into(), Value::String(info[..start].trim().to_string()));
-        return Some(attrs)
+        attrs.insert("language".into(), info[..start].trim().into());
+        return Some(attrs);
       }
     }
   }
@@ -111,46 +110,28 @@ pub fn convert_attributes(event: markdown::Event) -> Option<Attributes> {
 
   match event {
     End(tag) | Start(tag) => match tag {
-      Heading(level, ..) => Some(HashMap::from([(
-        String::from("level"),
-        Value::Number(level as u8 as f64),
-      )])),
+      Heading(level, ..) => Some([("level".into(), (level as u8).into())].into()),
       CodeBlock(kind) => match kind {
         Fenced(info) => convert_fenced_info(&info.to_string()),
         Indented => None,
       },
       List(ordered) => match ordered {
-        Some(n) => Some(HashMap::from([
-          (String::from("ordered"), Value::Boolean(true)),
-          (String::from("number"), Value::Number(n as f64)),
-        ])),
-        None => Some(HashMap::from([(
-          String::from("ordered"),
-          Value::Boolean(false),
-        )])),
+        Some(n) => Some([("ordered".into(), true.into()), ("number".into(), n.into())].into()),
+        None => Some([("ordered".into(), false.into())].into()),
       },
       Link(_, link, title) => Some(if title.is_empty() {
-        HashMap::from([(String::from("href"), Value::String(link.to_string()))])
+        [("href".into(), link.into())].into()
       } else {
-        HashMap::from([
-          (String::from("href"), Value::String(link.to_string())),
-          (String::from("title"), Value::String(title.to_string())),
-        ])
+        [("href".into(), link.into()), ("title".into(), title.into())].into()
       }),
       Image(_, link, title) => Some(if title.is_empty() {
-        HashMap::from([(String::from("src"), Value::String(link.to_string()))])
+        [("src".into(), link.into())].into()
       } else {
-        HashMap::from([
-          (String::from("src"), Value::String(link.to_string())),
-          (String::from("title"), Value::String(title.to_string())),
-        ])
+        [("src".into(), link.into()), ("title".into(), title.into())].into()
       }),
       _ => None,
     },
-    Text(text) | Code(text) => Some(HashMap::from([(
-      String::from("content"),
-      Value::String(text.to_string()),
-    )])),
+    Text(text) | Code(text) => Some([("content".into(), text.into())].into()),
     _ => None,
   }
 }

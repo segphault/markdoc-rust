@@ -41,7 +41,7 @@ fn convert_tag(pair: Pair<Rule>) -> Tag<Rule> {
         match item.as_rule() {
           Rule::Primary => {
             attrs.insert(
-              String::from("primary"),
+              "primary".into(),
               convert_value(item.into_inner().next().unwrap()),
             );
           }
@@ -118,7 +118,7 @@ fn convert_value(pair: Pair<Rule>) -> Value {
     ),
     Rule::Function => convert_function(pair),
     Rule::ValueNull => Value::Null,
-    Rule::Identifier | Rule::ValueString => Value::String(String::from(pair.as_str())),
+    Rule::Identifier | Rule::ValueString => pair.as_str().into(),
     Rule::ValueNumber => Value::Number(pair.as_str().parse().unwrap()),
     Rule::ValueBoolean => Value::Boolean(pair.as_str().parse().unwrap()),
     Rule::ValueArray => Value::Array(pair.into_inner().map(convert_value).collect()),
@@ -129,7 +129,7 @@ fn convert_value(pair: Pair<Rule>) -> Value {
           let mut inner = item.into_inner();
           let key = inner.next().unwrap().as_str();
           let value = convert_value(inner.next().unwrap());
-          (String::from(key), value)
+          (key.into(), value)
         })
         .collect(),
     ),
@@ -140,7 +140,6 @@ fn convert_value(pair: Pair<Rule>) -> Value {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use std::collections::HashMap;
 
   #[test]
   fn parse_basic_tag_open() {
@@ -155,10 +154,7 @@ mod tests {
       output,
       Tag::Open(
         "foo",
-        Some(HashMap::from([
-          (String::from("bar"), Value::Number(1.0)),
-          (String::from("baz"), Value::Boolean(true))
-        ]))
+        Some([("bar".into(), 1.into()), ("baz".into(), true.into())].into())
       )
     )
   }
@@ -170,10 +166,7 @@ mod tests {
       output,
       Tag::Open(
         "foo",
-        Some(HashMap::from([(
-          String::from("primary"),
-          Value::Variable('$', vec![Value::String(String::from("bar"))])
-        )]))
+        Some([("primary".into(), Value::Variable('$', vec!["bar".into()]))].into())
       )
     )
   }
@@ -185,13 +178,13 @@ mod tests {
       output,
       Tag::Open(
         "foo",
-        Some(HashMap::from([
-          (
-            String::from("primary"),
-            Value::Variable('$', vec![Value::String(String::from("bar"))])
-          ),
-          (String::from("baz"), Value::Boolean(true))
-        ]))
+        Some(
+          [
+            ("primary".into(), Value::Variable('$', vec!["bar".into()])),
+            ("baz".into(), true.into())
+          ]
+          .into()
+        )
       )
     )
   }
@@ -201,13 +194,13 @@ mod tests {
     let output = Tag::from("{% foo={bar: 1} baz=\"test\" %}");
     assert_eq!(
       output,
-      Tag::Annotation(HashMap::from([
-        (
-          String::from("foo"),
-          Value::Hash(HashMap::from([(String::from("bar"), Value::Number(1.0))]))
-        ),
-        (String::from("baz"), Value::String(String::from("test")))
-      ]))
+      Tag::Annotation(
+        [
+          ("foo".into(), Value::Hash([("bar".into(), 1.into())].into())),
+          ("baz".into(), "test".into())
+        ]
+        .into()
+      )
     )
   }
 
@@ -216,13 +209,7 @@ mod tests {
     let output = Tag::from("{% foo bar=\"baz\" /%}");
     assert_eq!(
       output,
-      Tag::Standalone(
-        "foo",
-        Some(HashMap::from([(
-          String::from("bar"),
-          Value::String(String::from("baz"))
-        )]))
-      )
+      Tag::Standalone("foo", Some([("bar".into(), "baz".into())].into()))
     )
   }
 
@@ -235,11 +222,7 @@ mod tests {
 
     assert_eq!(
       convert_value(pair),
-      Value::Array(vec![
-        Value::Number(1.0),
-        Value::Number(2.0),
-        Value::Number(3.0)
-      ])
+      vec![1.into(), 2.into(), 3.into()].into()
     );
   }
 
@@ -252,11 +235,7 @@ mod tests {
 
     assert_eq!(
       convert_value(pair),
-      Value::Array(vec![
-        Value::Number(1.0),
-        Value::Number(2.0),
-        Value::Number(3.0)
-      ])
+      vec![1.into(), 2.into(), 3.into()].into()
     );
   }
 
@@ -269,10 +248,7 @@ mod tests {
 
     assert_eq!(
       convert_value(pair),
-      Value::Hash(HashMap::from([
-        (String::from("foo"), Value::String(String::from("bar"))),
-        (String::from("baz"), Value::Boolean(true))
-      ]))
+      [("foo", "bar".into()), ("baz", true.into())].into()
     )
   }
 
@@ -285,17 +261,11 @@ mod tests {
 
     assert_eq!(
       convert_attributes(pair),
-      HashMap::from([
-        (String::from("foo"), Value::Boolean(true)),
-        (
-          String::from("bar"),
-          Value::Array(vec![
-            Value::Number(1.0),
-            Value::Number(2.0),
-            Value::Number(3.0)
-          ])
-        )
-      ])
+      [
+        ("foo".into(), true.into()),
+        ("bar".into(), vec![1.into(), 2.into(), 3.into()].into())
+      ]
+      .into()
     )
   }
 
@@ -308,10 +278,7 @@ mod tests {
 
     assert_eq!(
       convert_attributes(pair),
-      Attributes::from([
-        ("foo".to_string(), Value::Boolean(true)),
-        ("bar".to_string(), Value::String("".to_string()))
-      ])
+      [("foo".into(), true.into()), ("bar".into(), "".into())].into()
     )
   }
 
@@ -324,17 +291,15 @@ mod tests {
 
     assert_eq!(
       convert_attributes(pair),
-      HashMap::from([
-        (String::from("asdf"), Value::Number(1.0)),
-        (String::from("id"), Value::String(String::from("foo"))),
+      [
+        ("asdf".into(), 1.into()),
+        ("id".into(), "foo".into()),
         (
-          String::from("class"),
-          Value::Hash(Attributes::from([
-            (String::from("bar"), Value::Boolean(true)),
-            (String::from("baz"), Value::Boolean(true)),
-          ]))
+          "class".into(),
+          [("bar", true.into()), ("baz", true.into())].into()
         )
-      ])
+      ]
+      .into()
     )
   }
 
@@ -349,12 +314,7 @@ mod tests {
       convert_value(pair),
       Value::Variable(
         '$',
-        vec![
-          Value::String(String::from("foo")),
-          Value::String(String::from("bar")),
-          Value::Number(10.0),
-          Value::String(String::from("baz")),
-        ]
+        vec!["foo".into(), "bar".into(), 10.into(), "baz".into()]
       )
     )
   }
@@ -369,12 +329,13 @@ mod tests {
     assert_eq!(
       convert_function(pair),
       Value::Function(
-        "foo".to_string(),
-        Attributes::from([
-          ("0".to_string(), Value::Number(1.0)),
-          ("bar".to_string(), Value::Boolean(true)),
-          ("2".to_string(), Value::Number(3.0)),
-        ])
+        "foo".into(),
+        [
+          ("0".into(), 1.into()),
+          ("bar".into(), true.into()),
+          ("2".into(), 3.into()),
+        ]
+        .into()
       )
     )
   }
@@ -386,16 +347,16 @@ mod tests {
       tag,
       Tag::Open(
         "foo",
-        Some(Attributes::from([(
-          "bar".to_string(),
-          Value::Function(
-            "baz".to_string(),
-            Attributes::from([(
-              "0".to_string(),
-              Value::Variable('$', vec![Value::String("test".to_string())])
-            )])
-          )
-        )]))
+        Some(
+          [(
+            "bar".into(),
+            Value::Function(
+              "baz".into(),
+              [("0".into(), Value::Variable('$', vec!["test".into()]))].into()
+            )
+          )]
+          .into()
+        )
       )
     )
   }

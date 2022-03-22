@@ -1,34 +1,30 @@
-use crate::model::{Attributes, Node, Token, Type, Value};
+use crate::model::{Attributes, Node, NodeRef, Token, Type};
 use crate::tokenize::tokenize;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 pub fn extract_frontmatter(input: &str) -> (&str, Option<Attributes>) {
-  match input
+  if let Some((frontmatter, text)) = input
     .strip_prefix("---")
     .and_then(|left| left.split_once("---"))
   {
-    Some((frontmatter, text)) => (
+    (
       text,
-      Some(Attributes::from([(
-        "frontmatter".into(),
-        Value::String(frontmatter.into()),
-      )])),
-    ),
-    None => (input, None),
+      Some([("frontmatter".into(), frontmatter.into())].into()),
+    )
+  } else {
+    (input, None)
   }
 }
 
-pub fn parse(input: &str) -> Rc<RefCell<Node>> {
+pub fn parse(input: &str) -> NodeRef {
   let (source, attrs) = extract_frontmatter(input);
-  let root = Rc::new(RefCell::new(Node::new(Type::Document, attrs)));
+  let root: NodeRef = Node::new(Type::Document, attrs).into();
   let mut nodes = vec![root.clone()];
-  let mut inline: Option<Rc<RefCell<Node>>> = None;
+  let mut inline: Option<NodeRef> = None;
 
   for token in tokenize(source) {
     // When adding an inline node, insert an inline-type block node if one isn't already present
     if token.is_inline() && inline.is_none() {
-      let inline_node = Rc::new(RefCell::new(Node::new(Type::Inline, None)));
+      let inline_node: NodeRef = Node::new(Type::Inline, None).into();
       if let Some(parent) = nodes.last_mut() {
         inline = Some(parent.clone());
         parent.borrow_mut().children.push(inline_node.clone());
@@ -45,7 +41,7 @@ pub fn parse(input: &str) -> Rc<RefCell<Node>> {
 
     match token {
       Token::Open { kind, attributes } => {
-        let node = Rc::new(RefCell::new(Node::new(kind, attributes)));
+        let node: NodeRef = Node::new(kind, attributes).into();
         if let Some(parent) = nodes.last_mut() {
           parent.borrow_mut().children.push(node.clone());
         }
@@ -76,10 +72,7 @@ pub fn parse(input: &str) -> Rc<RefCell<Node>> {
             }
           }
 
-          parent
-            .borrow_mut()
-            .children
-            .push(Rc::new(RefCell::new(node)));
+          parent.borrow_mut().children.push(node.into());
         }
       }
 
@@ -101,7 +94,6 @@ pub fn parse(input: &str) -> Rc<RefCell<Node>> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::model::{Attributes, Value};
 
   #[test]
   fn fence_with_info_string() {
@@ -109,30 +101,34 @@ mod tests {
 
     assert_eq!(
       output,
-      Rc::new(RefCell::new(Node {
+      Node {
         kind: Type::Document,
         attributes: None,
-        children: vec![Rc::new(RefCell::new(Node {
+        children: vec![Node {
           kind: Type::Fence,
-          attributes: Some(Attributes::from([
-            ("foo".into(), Value::Number(2.0)),
-            ("content".into(), Value::String("This is a test\n".into())),
-            ("language".into(), Value::String("javascript".into())),
-          ])),
-          children: vec![Rc::new(RefCell::new(Node {
+          attributes: Some(
+            [
+              ("foo".into(), 2.into()),
+              ("content".into(), "This is a test\n".into()),
+              ("language".into(), "javascript".into()),
+            ]
+            .into()
+          ),
+          children: vec![Node {
             kind: Type::Inline,
             attributes: None,
-            children: vec![Rc::new(RefCell::new(Node {
+            children: vec![Node {
               kind: Type::Text,
-              attributes: Some(Attributes::from([(
-                "content".into(),
-                Value::String("This is a test\n".into())
-              )])),
+              attributes: Some([("content".into(), "This is a test\n".into())].into()),
               children: vec![]
-            }))]
-          }))]
-        }))]
-      }))
+            }
+            .into()]
+          }
+          .into()]
+        }
+        .into()]
+      }
+      .into()
     )
   }
 
@@ -141,23 +137,27 @@ mod tests {
     let output = parse("# Heading");
     assert_eq!(
       output,
-      Rc::new(RefCell::new(Node {
+      Node {
         kind: Type::Document,
         attributes: None,
-        children: vec![Rc::new(RefCell::new(Node {
+        children: vec![Node {
           kind: Type::Heading,
-          attributes: Some(Attributes::from([("level".into(), Value::Number(1.0))])),
-          children: vec![Rc::new(RefCell::new(Node {
+          attributes: Some([("level".into(), 1.into())].into()),
+          children: vec![Node {
             kind: Type::Inline,
             attributes: None,
-            children: vec![Rc::new(RefCell::new(Node {
+            children: vec![Node {
               kind: Type::Text,
-              attributes: Some([("content".into(), Value::String("Heading".to_string()))].into()),
+              attributes: Some([("content".into(), "Heading".into())].into()),
               children: vec![]
-            }))]
-          }))]
-        }))]
-      }))
+            }
+            .into()]
+          }
+          .into()]
+        }
+        .into()]
+      }
+      .into()
     )
   }
 
@@ -166,29 +166,27 @@ mod tests {
     let output = parse("# Heading {% foo=true %}");
     assert_eq!(
       output,
-      Rc::new(RefCell::new(Node {
+      Node {
         kind: Type::Document,
         attributes: None,
-        children: vec![Rc::new(RefCell::new(Node {
+        children: vec![Node {
           kind: Type::Heading,
-          attributes: Some(Attributes::from([
-            ("level".into(), Value::Number(1.0)),
-            ("foo".into(), Value::Boolean(true))
-          ])),
-          children: vec![Rc::new(RefCell::new(Node {
+          attributes: Some([("level".into(), 1.into()), ("foo".into(), true.into())].into()),
+          children: vec![Node {
             kind: Type::Inline,
             attributes: None,
-            children: vec![Rc::new(RefCell::new(Node {
+            children: vec![Node {
               kind: Type::Text,
-              attributes: Some(Attributes::from([(
-                "content".into(),
-                Value::String("Heading ".into())
-              )])),
+              attributes: Some([("content".into(), "Heading ".into())].into()),
               children: vec![]
-            }))]
-          }))]
-        }))]
-      }))
+            }
+            .into()]
+          }
+          .into()]
+        }
+        .into()]
+      }
+      .into()
     )
   }
 }
