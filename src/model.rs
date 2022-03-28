@@ -34,6 +34,12 @@ impl From<CowStr<'_>> for Value {
   }
 }
 
+impl From<&String> for Value {
+  fn from(value: &String) -> Value {
+    Value::String(value.to_string())
+  }
+}
+
 impl From<bool> for Value {
   fn from(value: bool) -> Value {
     Value::Boolean(value)
@@ -145,7 +151,7 @@ impl Type {
   }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, PartialEq)]
 #[serde(tag = "operation", content = "token")]
 pub enum Token {
   Open {
@@ -176,6 +182,16 @@ impl Token {
     match self {
       Open { kind, .. } | Append { kind, .. } | Close { kind } => kind.is_inline(),
       _ => false,
+    }
+  }
+
+  pub fn attribute(&self, key: &str) -> Option<&Value> {
+    use Token::*;
+    match self {
+      Open { attributes, .. } | Append { attributes, .. } | Annotate { attributes, .. } => {
+        attributes.as_ref().and_then(|x| x.get(key))
+      }
+      _ => None,
     }
   }
 }
@@ -234,9 +250,14 @@ impl Serialize for Node {
   {
     let mut state = serializer.serialize_struct("Node", 5)?;
     state.serialize_field("$$mdtype", "Node")?;
-    state.serialize_field("type", &self.kind)?;
     state.serialize_field("children", &self.children)?;
     state.serialize_field("inline", &self.kind.is_inline())?;
+
+    if let Type::Tag { name, .. } = &self.kind {
+      state.serialize_field("type", &format!("tag:{}", name))?;
+    } else {
+      state.serialize_field("type", &self.kind)?;
+    };
 
     if let Some(attrs) = &self.attributes {
       state.serialize_field("attributes", &attrs)?;

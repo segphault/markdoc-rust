@@ -12,3 +12,6 @@ pest = "2.0"
 pest_derive = "2.0"
 serde = { version = "1.0", features = ["derive", "rc"] }
 pulldown-cmark = { path = "../pulldown-cmark", features = ["serde", "simd"] }
+
+[dev-dependencies]
+pretty_assertions = "1.2.0"

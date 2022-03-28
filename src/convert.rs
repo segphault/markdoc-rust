@@ -1,6 +1,6 @@
 use crate::markdown;
 use crate::model::{Attributes, Token, Type};
-use crate::tag::Tag;
+use crate::tag::{Rule, Tag};
 
 impl<'a> From<&'a markdown::Event<'a>> for Type {
   fn from(event: &'a markdown::Event<'a>) -> Type {
@@ -47,41 +47,7 @@ impl From<markdown::Event<'_>> for Token {
         attributes: convert_attributes(event),
       },
       End(_) => Token::Close { kind },
-      MarkdocTag(text, inline) => {
-        let parsed_tag = Tag::from(text.as_ref());
-        match parsed_tag {
-          Tag::Standalone(name, attributes) => Token::Append {
-            kind: Type::Tag {
-              name: String::from(name),
-              inline,
-            },
-            attributes,
-          },
-          Tag::Open(name, attributes) => Token::Open {
-            kind: Type::Tag {
-              name: String::from(name),
-              inline,
-            },
-            attributes,
-          },
-          Tag::Close(name) => Token::Close {
-            kind: Type::Tag {
-              name: String::from(name),
-              inline,
-            },
-          },
-          Tag::Value(variable) => Token::Append {
-            kind: Type::Text,
-            attributes: Some([("content".into(), variable)].into()),
-          },
-          Tag::Annotation(attributes) => Token::Annotate {
-            attributes: Some(attributes),
-          },
-          Tag::Error(error) => Token::Error {
-            message: error.to_string(),
-          },
-        }
-      }
+      MarkdocTag(text, inline) => convert_tag(Tag::from(text.as_ref()), inline),
       _ => Token::Append {
         kind,
         attributes: convert_attributes(event),
@@ -91,19 +57,56 @@ impl From<markdown::Event<'_>> for Token {
 }
 
 fn convert_fenced_info(info: &str) -> Option<Attributes> {
+  let language = info.split_ascii_whitespace().next().unwrap_or("").into();
+
   if let Some(start) = info.find("{%") {
     if let Some(end) = markdown::scan_markdoc_tag_end(info[start..].as_bytes()) {
       if let Tag::Annotation(mut attrs) = Tag::from(&info[start..(start + end)]) {
-        attrs.insert("language".into(), info[..start].trim().into());
+        attrs.insert("language".into(), language);
         return Some(attrs);
       }
     }
   }
 
-  None
+  Some([("language".into(), language)].into())
 }
 
-pub fn convert_attributes(event: markdown::Event) -> Option<Attributes> {
+pub(crate) fn convert_tag(tag: Tag<Rule>, inline: bool) -> Token {
+  match tag {
+    Tag::Standalone(name, attributes) => Token::Append {
+      kind: Type::Tag {
+        name: name.into(),
+        inline,
+      },
+      attributes,
+    },
+    Tag::Open(name, attributes) => Token::Open {
+      kind: Type::Tag {
+        name: name.into(),
+        inline,
+      },
+      attributes,
+    },
+    Tag::Close(name) => Token::Close {
+      kind: Type::Tag {
+        name: name.into(),
+        inline,
+      },
+    },
+    Tag::Value(variable) => Token::Append {
+      kind: Type::Text,
+      attributes: Some([("content".into(), variable)].into()),
+    },
+    Tag::Annotation(attributes) => Token::Annotate {
+      attributes: Some(attributes),
+    },
+    Tag::Error(error) => Token::Error {
+      message: error.to_string(),
+    },
+  }
+}
+
+pub(crate) fn convert_attributes(event: markdown::Event) -> Option<Attributes> {
   use markdown::CodeBlockKind::*;
   use markdown::Event::*;
   use markdown::Tag::*;

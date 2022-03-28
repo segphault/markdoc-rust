@@ -6,6 +6,7 @@ extern crate pest;
 
 mod convert;
 pub mod model;
-mod tag;
-pub mod tokenize;
 pub mod parse;
+mod tag;
+pub mod template;
+pub mod tokenize;
