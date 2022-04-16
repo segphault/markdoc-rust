@@ -30,7 +30,7 @@ pub fn parse(content: &str) -> Vec<Token> {
       let preceding_end = if inline { pos } else { line_start };
 
       output.push(text_token(&content[last..preceding_end]));
-      output.push(convert_tag(tag, inline));
+      output.push(convert_tag(tag, true)); //inline));
 
       last = end;
     }
@@ -83,7 +83,7 @@ mod tests {
         Token::Open {
           kind: Type::Tag {
             name: "foo".into(),
-            inline: false
+            inline: true // todo(compat): false
           },
           attributes: Some([("blah".into(), "asdf".into())].into())
         },
@@ -91,7 +91,7 @@ mod tests {
         Token::Close {
           kind: Type::Tag {
             name: "foo".into(),
-            inline: false
+            inline: true // todo(compat): false
           }
         },
         text_token("\n")

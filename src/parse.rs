@@ -22,70 +22,204 @@ pub fn parse(input: &str) -> NodeRef {
   let mut tokens = tokenize(source);
   let mut nodes = vec![root.clone()];
 
-  parse_tokens(&mut tokens, &mut nodes);
+  parse_tokens(&mut tokens, &mut nodes, false);
 
   root
 }
 
-fn parse_tokens(tokens: &mut dyn Iterator<Item = Token>, nodes: &mut Vec<NodeRef>) {
+fn append_to_parent(nodes: &mut Vec<NodeRef>, node: NodeRef) {
+  if let Some(parent) = nodes.last_mut() {
+    parent.borrow_mut().children.push(node);
+  }
+}
+
+fn parse_tokens(tokens: &mut dyn Iterator<Item = Token>, nodes: &mut Vec<NodeRef>, in_fence: bool) {
   let mut inline: Option<NodeRef> = None;
+  let mut fence: Option<String> = None;
+  let mut thead = false;
 
   for token in tokens {
+    // Concatenate text nodes for fence
+    if let (
+      Token::Append {
+        kind: Type::Text,
+        attributes: Some(attrs),
+      },
+      Some(content),
+    ) = (&token, &mut fence)
+    {
+      if let Some(Value::String(value)) = attrs.get("content") {
+        content.push_str(value);
+      }
+      continue;
+    }
+
+    // todo(compat): Combine successive text nodes 
     if let Some(parent) = nodes.last() {
-      if parent.borrow().kind == Type::Fence && parent.borrow().attribute("content").is_none() {
-        if let Some(Value::String(value)) = token.attribute("content") {
-          parent.borrow_mut().set_attribute("content", value.into());
-          parse_tokens(&mut template::parse(value).into_iter(), nodes);
+      if let Some(last) = parent.borrow().children.last() {
+        let mut node = last.borrow_mut();
+
+        if let (
+          Node {
+            kind: Type::Text,
+            attributes: Some(existing_attrs),
+            ..
+          },
+          Token::Append {
+            kind: Type::Text,
+            attributes: Some(new_attrs),
+          },
+        ) = (&*node, &token)
+        {
+          if let (Some(Value::String(existing_content)), Some(Value::String(new_content))) =
+            (existing_attrs.get("content"), new_attrs.get("content"))
+          {
+            if new_content != " " {
+              let updated_content = format!("{}{}", existing_content, new_content);
+              node.set_attribute("content", updated_content.into());
+              continue;
+            }
+          }
+        }
+      }
+    }
+
+    if !in_fence { // todo(compat): remove fence condition
+      // When adding an inline node, insert an inline-type block node if one isn't already present
+      if token.is_inline() && inline.is_none() {
+        let inline_node: NodeRef = Node::new(Type::Inline, None).into();
+        if let Some(parent) = nodes.last_mut() {
+          inline = Some(parent.clone());
+          parent.borrow_mut().children.push(inline_node.clone());
+        }
+        nodes.push(inline_node);
+      }
+
+      if let Some(parent) = nodes.last() {
+        if !token.is_inline() && inline.is_some() && parent.borrow().kind == Type::Inline {
+          inline = None;
+          nodes.pop();
+        }
+      }
+    }
+
+    match token {
+      // Parse tags inside of fenced code block
+      Token::Close { kind: Type::Fence } => {
+        if let Some(content) = fence {
+          parse_tokens(&mut template::parse(&content).into_iter(), nodes, true);
+          if let Some(parent) = nodes.pop() {
+            parent.borrow_mut().set_attribute("content", content.into());
+          }
         }
 
-        continue;
+        fence = None;
       }
-    }
 
-    // When adding an inline node, insert an inline-type block node if one isn't already present
-    if token.is_inline() && inline.is_none() {
-      let inline_node: NodeRef = Node::new(Type::Inline, None).into();
-      if let Some(parent) = nodes.last_mut() {
-        inline = Some(parent.clone());
-        parent.borrow_mut().children.push(inline_node.clone());
+      // Table normalization logic
+      Token::Open {
+        kind: Type::TableHead,
+        attributes,
+      } => {
+        thead = true;
+
+        let node: NodeRef = Node::new(Type::TableHead, attributes).into();
+        append_to_parent(nodes, node.clone());
+        nodes.push(node);
+
+        let node: NodeRef = Node::new(Type::TableRow, None).into();
+        append_to_parent(nodes, node.clone());
+        nodes.push(node);
       }
-      nodes.push(inline_node);
-    }
 
-    if let Some(parent) = nodes.last() {
-      if !token.is_inline() && inline.is_some() && parent.borrow().kind == Type::Inline {
-        inline = None;
+      Token::Close {
+        kind: Type::TableHead,
+      } => {
+        thead = false;
+        nodes.pop();
+        nodes.pop();
+
+        let node: NodeRef = Node::new(Type::TableBody, None).into();
+        append_to_parent(nodes, node.clone());
+        nodes.push(node);
+      }
+
+      Token::Close { kind: Type::Table } => {
+        nodes.pop();
         nodes.pop();
       }
-    }
 
-    if let Some(parent) = nodes.last_mut() {
-      match token {
-        Token::Open { kind, attributes } => {
-          let node: NodeRef = Node::new(kind, attributes).into();
-          parent.borrow_mut().children.push(node.clone());
-          nodes.push(node);
-        }
+      Token::Open {
+        kind: Type::TableCell,
+        attributes,
+      } => {
+        let kind = if thead {
+          Type::TableHeadCell
+        } else {
+          Type::TableCell
+        };
 
-        Token::Close { kind } => {
+        let node: NodeRef = Node::new(kind, attributes).into();
+        append_to_parent(nodes, node.clone());
+        nodes.push(node);
+      }
+
+      Token::Close {
+        kind: Type::TableCell,
+      } => {
+        let kind = if thead {
+          Type::TableHeadCell
+        } else {
+          Type::TableCell
+        };
+
+        if let Some(parent) = nodes.last() {
           if parent.borrow().kind == kind {
             nodes.pop();
           }
         }
+      }
 
-        Token::Append { kind, attributes } => {
-          let node = Node::new(kind, attributes);
-          parent.borrow_mut().children.push(node.into());
+      // Standard token handlers
+      Token::Open { kind, attributes } => {
+        if kind == Type::Fence {
+          fence = Some(String::new());
         }
 
-        Token::Annotate { attributes } => {
-          if let (Some(node), Some(attributes)) = (&inline, attributes) {
-            node.borrow_mut().set_attributes(attributes);
+        let node: NodeRef = Node::new(kind, attributes).into();
+        append_to_parent(nodes, node.clone());
+        nodes.push(node);
+      }
+
+      Token::Close { kind } => {
+        if let Some(parent) = nodes.last() {
+          if parent.borrow().kind == kind {
+            nodes.pop();
+          }
+        }
+      }
+
+      Token::Append { kind, attributes } => {
+        // Ignore empty tokens
+        if let Some(attrs) = &attributes {
+          if let Some(Value::String(content)) = attrs.get("content") {
+            if content.is_empty() {
+              continue;
+            }
           }
         }
 
-        _ => (),
+        let node = Node::new(kind, attributes);
+        append_to_parent(nodes, node.into());
       }
+
+      Token::Annotate { attributes } => {
+        if let (Some(node), Some(attributes)) = (&inline, attributes) {
+          node.borrow_mut().set_attributes(attributes);
+        }
+      }
+
+      _ => (),
     }
   }
 }
@@ -93,6 +227,7 @@ fn parse_tokens(tokens: &mut dyn Iterator<Item = Token>, nodes: &mut Vec<NodeRef
 #[cfg(test)]
 mod tests {
   use super::*;
+  use pretty_assertions::assert_eq;
 
   #[test]
   fn fence_with_info_string() {
@@ -114,14 +249,9 @@ mod tests {
             .into()
           ),
           children: vec![Node {
-            kind: Type::Inline,
-            attributes: None,
-            children: vec![Node {
-              kind: Type::Text,
-              attributes: Some([("content".into(), "This is a test\n".into())].into()),
-              children: vec![]
-            }
-            .into()]
+            kind: Type::Text,
+            attributes: Some([("content".into(), "This is a test\n".into())].into()),
+            children: vec![]
           }
           .into()]
         }
@@ -160,7 +290,7 @@ mod tests {
     )
   }
 
-  // #[test]
+  #[test]
   fn parse_heading_with_annotation() {
     let output = parse("# Heading {% foo=true %}");
     assert_eq!(

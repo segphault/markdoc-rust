@@ -119,7 +119,13 @@ pub(crate) fn convert_attributes(event: markdown::Event) -> Option<Attributes> {
         Indented => None,
       },
       List(ordered) => match ordered {
-        Some(n) => Some([("ordered".into(), true.into()), ("number".into(), n.into())].into()),
+        Some(n) => Some(
+          [
+            ("ordered".into(), true.into()),
+            // todo(compat): ("number".into(), n.into())
+          ]
+          .into(),
+        ),
         None => Some([("ordered".into(), false.into())].into()),
       },
       Link(_, link, title) => Some(if title.is_empty() {

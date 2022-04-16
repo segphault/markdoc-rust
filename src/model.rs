@@ -40,6 +40,12 @@ impl From<&String> for Value {
   }
 }
 
+impl From<String> for Value {
+  fn from(value: String) -> Value {
+    Value::String(value.to_string())
+  }
+}
+
 impl From<bool> for Value {
   fn from(value: bool) -> Value {
     Value::Boolean(value)
@@ -82,7 +88,6 @@ where
 {
   let mut map = s.serialize_map(Some(3))?;
   map.serialize_entry("$$mdtype", "Variable")?;
-  map.serialize_entry("prefix", ch)?;
   map.serialize_entry("path", &path)?;
   map.end()
 }
@@ -112,8 +117,12 @@ pub enum Type {
   Table,
   #[serde(rename = "thead")]
   TableHead,
+  #[serde(rename = "tbody")]
+  TableBody,
   #[serde(rename = "tr")]
   TableRow,
+  #[serde(rename = "th")]
+  TableHeadCell,
   #[serde(rename = "td")]
   TableCell,
   #[serde(rename = "em")]
@@ -177,10 +186,19 @@ pub enum Token {
 }
 
 impl Token {
+  pub fn kind(&self) -> Option<&Type> {
+    use Token::*;
+    match self {
+      Open { kind, .. } | Append { kind, .. } | Close {kind} => Some(kind),
+      _ => None
+    }
+  }
+
   pub fn is_inline(&self) -> bool {
     use Token::*;
     match self {
       Open { kind, .. } | Append { kind, .. } | Close { kind } => kind.is_inline(),
+      Annotate { .. } => true,
       _ => false,
     }
   }
@@ -248,13 +266,19 @@ impl Serialize for Node {
   where
     S: Serializer,
   {
-    let mut state = serializer.serialize_struct("Node", 5)?;
+    let mut field_count = 5;
+    if let Type::Tag { .. } = &self.kind {
+      field_count += 1;
+    }
+
+    let mut state = serializer.serialize_struct("Node", field_count)?;
     state.serialize_field("$$mdtype", "Node")?;
     state.serialize_field("children", &self.children)?;
     state.serialize_field("inline", &self.kind.is_inline())?;
 
     if let Type::Tag { name, .. } = &self.kind {
-      state.serialize_field("type", &format!("tag:{}", name))?;
+      state.serialize_field("type", "tag")?;
+      state.serialize_field("tag", name)?;
     } else {
       state.serialize_field("type", &self.kind)?;
     };
