@@ -1,88 +1,71 @@
-use crate::markdown::CowStr;
+use std::ops::Range;
+use pulldown_cmark::CowStr;
 use serde::ser::{SerializeMap, SerializeStruct};
 use serde::{Serialize, Serializer};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-pub type Attributes = HashMap<String, Value>;
+pub type Attributes<'a> = HashMap<CowStr<'a>, Value<'a>>;
 
 #[derive(PartialEq, Clone, Debug, Serialize)]
 #[serde(untagged)]
-pub enum Value {
-  Hash(Attributes),
-  Array(Vec<Value>),
-  String(String),
+pub enum Value<'a> {
+  Hash(Attributes<'a>),
+  Array(Vec<Value<'a>>),
+  String(CowStr<'a>),
   Number(f64),
   Boolean(bool),
   #[serde(serialize_with = "serialize_variable")]
-  Variable(char, Vec<Value>),
+  Variable(char, Vec<Value<'a>>),
   #[serde(serialize_with = "serialize_function")]
-  Function(String, Attributes),
+  Function(CowStr<'a>, Attributes<'a>),
   Null,
 }
 
-impl From<&str> for Value {
-  fn from(value: &str) -> Value {
+impl<'a> From<&'a str> for Value<'a> {
+  fn from(value: &'a str) -> Value<'a> {
     Value::String(value.into())
   }
 }
 
-impl From<CowStr<'_>> for Value {
-  fn from(value: CowStr) -> Value {
-    Value::String(value.to_string())
+impl<'a> From<CowStr<'a>> for Value<'a> {
+  fn from(value: CowStr<'a>) -> Value<'a> {
+    Value::String(value)
   }
 }
 
-impl From<&String> for Value {
-  fn from(value: &String) -> Value {
-    Value::String(value.to_string())
+impl<'a> From<String> for Value<'a> {
+  fn from(value: String) -> Value<'a> {
+    Value::String(value.into())
   }
 }
 
-impl From<String> for Value {
-  fn from(value: String) -> Value {
-    Value::String(value.to_string())
-  }
-}
-
-impl From<bool> for Value {
-  fn from(value: bool) -> Value {
+impl<'a> From<bool> for Value<'a> {
+  fn from(value: bool) -> Value<'a> {
     Value::Boolean(value)
   }
 }
 
-impl From<i32> for Value {
-  fn from(value: i32) -> Value {
+impl<'a> From<i32> for Value<'a> {
+  fn from(value: i32) -> Value<'a> {
     Value::Number(value.into())
   }
 }
 
-impl From<u64> for Value {
-  fn from(value: u64) -> Value {
-    Value::Number(value as f64)
-  }
-}
-
-impl From<u8> for Value {
-  fn from(value: u8) -> Value {
-    Value::Number(value as f64)
-  }
-}
-
-impl From<Vec<Value>> for Value {
+impl<'a> From<Vec<Value<'a>>> for Value<'a> {
   fn from(value: Vec<Value>) -> Value {
     Value::Array(value)
   }
 }
 
-impl<const N: usize> From<[(&str, Value); N]> for Value {
-  fn from(value: [(&str, Value); N]) -> Value {
-    Value::Hash(value.map(|(k, v)| (k.into(), v)).into())
+impl<'a> From<Attributes<'a>> for Value<'a> {
+  fn from(value: Attributes) -> Value {
+    Value::Hash(value)
   }
 }
 
-fn serialize_variable<S>(ch: &char, path: &[Value], s: S) -> Result<S::Ok, S::Error>
+fn serialize_variable<S>(_ch: &char, path: &[Value], s: S) -> Result<S::Ok, S::Error>
 where
   S: Serializer,
 {
@@ -103,7 +86,7 @@ where
   map.end()
 }
 
-#[derive(PartialEq, Debug, Serialize)]
+#[derive(Clone, PartialEq, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Type {
   Document,
@@ -138,10 +121,14 @@ pub enum Type {
   #[serde(rename = "hr")]
   Rule,
   Nop,
-  Tag {
-    inline: bool,
-    name: String,
-  },
+  Error,
+  Tag(bool)
+}
+
+impl<'a> Default for Type {
+  fn default() -> Self {
+    Type::Nop
+  }
 }
 
 impl Type {
@@ -154,79 +141,46 @@ impl Type {
     use Type::*;
     match self {
       Emphasis | Strong | Strike | Link | Text | Code | SoftBreak | HardBreak => true,
-      Tag { inline, .. } => *inline,
+      Tag(inline) => *inline,
       _ => false,
     }
   }
 }
 
-#[derive(Serialize, Debug, PartialEq)]
-#[serde(tag = "operation", content = "token")]
-pub enum Token {
-  Open {
-    #[serde(rename = "type")]
-    kind: Type,
-    attributes: Option<Attributes>,
-  },
-  Close {
-    #[serde(rename = "type")]
-    kind: Type,
-  },
-  Append {
-    #[serde(rename = "type")]
-    kind: Type,
-    attributes: Option<Attributes>,
-  },
-  Annotate {
-    attributes: Option<Attributes>,
-  },
-  Error {
-    message: String,
-  },
+#[derive(PartialEq, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ErrorLevel {
+  Debug,
+  Info,
+  Warning,
+  Error,
+  Critical
 }
 
-impl Token {
-  pub fn kind(&self) -> Option<&Type> {
-    use Token::*;
-    match self {
-      Open { kind, .. } | Append { kind, .. } | Close {kind} => Some(kind),
-      _ => None
-    }
-  }
-
-  pub fn is_inline(&self) -> bool {
-    use Token::*;
-    match self {
-      Open { kind, .. } | Append { kind, .. } | Close { kind } => kind.is_inline(),
-      Annotate { .. } => true,
-      _ => false,
-    }
-  }
-
-  pub fn attribute(&self, key: &str) -> Option<&Value> {
-    use Token::*;
-    match self {
-      Open { attributes, .. } | Append { attributes, .. } | Annotate { attributes, .. } => {
-        attributes.as_ref().and_then(|x| x.get(key))
-      }
-      _ => None,
-    }
-  }
+#[derive(PartialEq, Debug, Serialize)]
+pub struct Error {
+  pub id: &'static str,
+  pub level: ErrorLevel,
+  pub message: String,
+  pub location: Option<Range<usize>>
 }
 
-#[derive(PartialEq, Debug)]
-pub struct Node {
+#[derive(PartialEq, Debug, Default)]
+pub struct Node<'a> {
   pub kind: Type,
-  pub attributes: Option<Attributes>,
-  pub children: Vec<NodeRef>,
+  pub tag: Option<CowStr<'a>>,
+  pub attributes: Option<Attributes<'a>>,
+  pub children: Option<Vec<NodeRef<'a>>>,
+  pub location: Option<Range<usize>>,
+  pub errors: Option<Vec<Error>>
 }
 
-impl Node {
-  pub fn new(kind: Type, attributes: Option<Attributes>) -> Self {
-    Node {
-      kind,
-      attributes,
-      children: Vec::new(),
+impl<'a> Node<'a> {
+  pub fn push(&mut self, child: NodeRef<'a>) {
+    if let Some(children) = &mut self.children {
+      children.push(child);
+    } else {
+      self.children = Some(vec![child]);
     }
   }
 
@@ -234,7 +188,7 @@ impl Node {
     self.attributes.as_ref().and_then(|x| x.get(key))
   }
 
-  pub fn set_attributes(&mut self, attrs: Attributes) {
+  pub fn set_attributes(&mut self, attrs: HashMap<CowStr<'a>, Value<'a>>) {
     if let Some(attributes) = &mut self.attributes {
       attributes.extend(attrs)
     } else {
@@ -242,46 +196,52 @@ impl Node {
     }
   }
 
-  pub fn set_attribute(&mut self, key: &str, value: Value) -> Option<Value> {
+  pub fn set_attribute(&mut self, key: CowStr<'a>, value: Value<'a>) -> Option<Value<'a>> {
     match &mut self.attributes {
-      Some(attrs) => attrs.insert(key.into(), value),
+      Some(attrs) => attrs.insert(key, value),
       None => {
-        self.attributes = Some(Attributes::from([(key.into(), value)]));
+        self.attributes = Some(Attributes::from([(key, value)]));
         None
       }
     }
   }
 }
 
-pub type NodeRef = Rc<RefCell<Node>>;
+pub type NodeRef<'a> = Rc<RefCell<Node<'a>>>;
 
-impl From<Node> for NodeRef {
+impl<'a> From<Node<'a>> for NodeRef<'a> {
   fn from(value: Node) -> NodeRef {
     Rc::new(RefCell::new(value))
   }
 }
 
-impl Serialize for Node {
+impl<'a> Serialize for Node<'a> {
   fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
   where
     S: Serializer,
   {
-    let mut field_count = 5;
+    let mut field_count = 6;
     if let Type::Tag { .. } = &self.kind {
       field_count += 1;
     }
 
     let mut state = serializer.serialize_struct("Node", field_count)?;
     state.serialize_field("$$mdtype", "Node")?;
-    state.serialize_field("children", &self.children)?;
     state.serialize_field("inline", &self.kind.is_inline())?;
+    state.serialize_field("location", &self.location)?;
 
-    if let Type::Tag { name, .. } = &self.kind {
+    if let Type::Tag(..) = &self.kind {
       state.serialize_field("type", "tag")?;
-      state.serialize_field("tag", name)?;
+      state.serialize_field("tag", &self.tag)?;
     } else {
       state.serialize_field("type", &self.kind)?;
     };
+
+    if let Some(children) = &self.children {
+      state.serialize_field("children", &children)?;
+    } else {
+      state.serialize_field("children", &Vec::<NodeRef<'a>>::new())?;
+    }
 
     if let Some(attrs) = &self.attributes {
       state.serialize_field("attributes", &attrs)?;

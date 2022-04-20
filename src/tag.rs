@@ -1,3 +1,4 @@
+use pulldown_cmark::CowStr;
 use crate::model::{Attributes, Value};
 use pest::error::Error;
 use pest::iterators::Pair;
@@ -9,20 +10,18 @@ struct TagParser;
 
 #[derive(PartialEq, Debug)]
 pub enum Tag<'a, R: RuleType> {
-  Standalone(&'a str, Option<Attributes>),
-  Open(&'a str, Option<Attributes>),
+  Standalone(&'a str, Option<Attributes<'a>>),
+  Open(&'a str, Option<Attributes<'a>>),
   Close(&'a str),
-  Annotation(Attributes),
-  Value(Value),
+  Annotation(Attributes<'a>),
+  Value(Value<'a>),
   Error(Error<R>),
 }
 
-impl<'a> From<&'a str> for Tag<'a, Rule> {
-  fn from(input: &'a str) -> Tag<'a, Rule> {
-    match TagParser::parse(Rule::Top, input) {
-      Ok(mut pair) => convert_tag(pair.next().unwrap()),
-      Err(err) => Tag::Error(err),
-    }
+pub fn parse(input: &str) -> Tag<Rule> {
+  match TagParser::parse(Rule::Top, input) {
+    Ok(mut pair) => convert_tag(pair.next().unwrap()),
+    Err(err) => Tag::Error(err)
   }
 }
 
@@ -74,13 +73,13 @@ fn convert_function(pair: Pair<Rule>) -> Value {
         let mut inner = item.into_inner();
         let key = inner.next().unwrap().as_str();
         let value = convert_value(inner.next().unwrap());
-        (String::from(key), value)
+        (key.into(), value)
       }
-      _ => (index.to_string(), convert_value(item)),
+      _ => (CowStr::from(index.to_string()), convert_value(item)),
     })
     .collect();
 
-  Value::Function(name.to_string(), attrs)
+  Value::Function(name.into(), attrs)
 }
 
 fn convert_attributes(pair: Pair<Rule>) -> Attributes {
@@ -94,17 +93,17 @@ fn convert_attributes(pair: Pair<Rule>) -> Attributes {
 
       match key {
         "." | "class" => {
-          classes.insert(String::from(value.as_str()), Value::Boolean(true));
+          classes.insert(value.as_str().into(), Value::Boolean(true));
           None
         }
-        "#" => Some((String::from("id"), convert_value(value))),
-        _ => Some((String::from(key), convert_value(value))),
+        "#" => Some(("id".into(), convert_value(value))),
+        _ => Some((key.into(), convert_value(value))),
       }
     })
     .collect();
 
   if !classes.is_empty() {
-    attributes.insert(String::from("class"), Value::Hash(classes));
+    attributes.insert("class".into(), Value::Hash(classes));
   }
 
   attributes
@@ -143,13 +142,13 @@ mod tests {
 
   #[test]
   fn parse_basic_tag_open() {
-    let output = Tag::from("{% foo %}");
+    let output = parse("{% foo %}");
     assert_eq!(output, Tag::Open("foo", None))
   }
 
   #[test]
   fn parse_tag_open_with_attributes() {
-    let output = Tag::from("{% foo bar=1 baz=true %}");
+    let output = parse("{% foo bar=1 baz=true %}");
     assert_eq!(
       output,
       Tag::Open(
@@ -161,7 +160,7 @@ mod tests {
 
   #[test]
   fn parse_tag_open_with_primary() {
-    let output = Tag::from("{% foo $bar %}");
+    let output = parse("{% foo $bar %}");
     assert_eq!(
       output,
       Tag::Open(
@@ -173,7 +172,7 @@ mod tests {
 
   #[test]
   fn parse_tag_open_with_primary_and_attributes() {
-    let output = Tag::from("{% foo $bar baz=true %}");
+    let output = parse("{% foo $bar baz=true %}");
     assert_eq!(
       output,
       Tag::Open(
@@ -191,7 +190,7 @@ mod tests {
 
   #[test]
   fn parse_annotation_with_attributes() {
-    let output = Tag::from("{% foo={bar: 1} baz=\"test\" %}");
+    let output = parse("{% foo={bar: 1} baz=\"test\" %}");
     assert_eq!(
       output,
       Tag::Annotation(
@@ -206,7 +205,7 @@ mod tests {
 
   #[test]
   fn parse_self_closing_tag() {
-    let output = Tag::from("{% foo bar=\"baz\" /%}");
+    let output = parse("{% foo bar=\"baz\" /%}");
     assert_eq!(
       output,
       Tag::Standalone("foo", Some([("bar".into(), "baz".into())].into()))
@@ -248,7 +247,7 @@ mod tests {
 
     assert_eq!(
       convert_value(pair),
-      [("foo", "bar".into()), ("baz", true.into())].into()
+      mdvalue!({"foo": "bar", "baz": true})
     )
   }
 
@@ -291,15 +290,7 @@ mod tests {
 
     assert_eq!(
       convert_attributes(pair),
-      [
-        ("asdf".into(), 1.into()),
-        ("id".into(), "foo".into()),
-        (
-          "class".into(),
-          [("bar", true.into()), ("baz", true.into())].into()
-        )
-      ]
-      .into()
+      mdattrs!(asdf=1, id="foo", class={"bar": true, "baz": true})
     )
   }
 
@@ -342,7 +333,7 @@ mod tests {
 
   #[test]
   fn tag_with_function_attribute_and_variable() {
-    let tag = Tag::from("{% foo bar=baz($test) %}");
+    let tag = parse("{% foo bar=baz($test) %}");
     assert_eq!(
       tag,
       Tag::Open(

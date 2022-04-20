@@ -1,10 +1,12 @@
-use crate::markdown;
-use crate::model::Token;
+use pulldown_cmark::{Event, OffsetIter, Options, Parser};
+use std::ops::Range;
 
-pub fn tokenize(input: &str) -> impl Iterator<Item = Token> + '_  {
-  let mut opts = markdown::Options::empty();
-  opts.insert(markdown::Options::ENABLE_TABLES);
-  opts.insert(markdown::Options::ENABLE_MARKDOC_TAGS);
-  opts.insert(markdown::Options::DISABLE_INDENTED_CODE_BLOCKS);
-  markdown::Parser::new_ext(input, opts).map(Token::from)
+pub type Events<'a> = Vec<(Event<'a>, Range<usize>)>;
+
+pub fn tokenize(input: &str) -> OffsetIter<'_, '_> {
+  let mut opts = Options::empty();
+  opts.insert(Options::ENABLE_TABLES);
+  opts.insert(Options::ENABLE_MARKDOC_TAGS);
+  opts.insert(Options::DISABLE_INDENTED_CODE_BLOCKS);
+  Parser::new_ext(input, opts).into_offset_iter()
 }

@@ -1,321 +1,307 @@
-use crate::model::{Attributes, Node, NodeRef, Token, Type, Value};
-use crate::template;
-use crate::tokenize::tokenize;
+use crate::model::*;
+use crate::tokenize::{tokenize, Events};
+use crate::{tag, template};
+use pulldown_cmark::{scan_markdoc_tag_end, CodeBlockKind, Event, Tag as EventTag};
+use std::ops::Deref;
+use tag::Tag;
 
-pub fn extract_frontmatter(input: &str) -> (&str, Option<Attributes>) {
-  if let Some((frontmatter, text)) = input
+pub fn extract_frontmatter(input: &str) -> Option<(&str, &str)> {
+  input
     .strip_prefix("---")
     .and_then(|left| left.split_once("---"))
-  {
-    (
-      text,
-      Some([("frontmatter".into(), frontmatter.trim().into())].into()),
-    )
-  } else {
-    (input, None)
-  }
 }
 
 pub fn parse(input: &str) -> NodeRef {
-  let (source, attrs) = extract_frontmatter(input);
-  let root: NodeRef = Node::new(Type::Document, attrs).into();
-  let mut tokens = tokenize(source);
+  let mut attributes = None;
+  let mut offset = 0;
+  let mut source = input;
+
+  if let Some((frontmatter, text)) = extract_frontmatter(input) {
+    attributes = Some(mdattrs!(frontmatter = frontmatter.trim()));
+    offset = input.len() - text.len();
+    source = text;
+  }
+
+  let root = NodeRef::from(Node {
+    kind: Type::Document,
+    location: Some(0..input.len()),
+    attributes,
+    ..Node::default()
+  });
+
+  let events = tokenize(source);
   let mut nodes = vec![root.clone()];
-
-  parse_tokens(&mut tokens, &mut nodes, false);
-
+  convert_events(source, &mut nodes, events.collect(), offset, true);
   root
 }
 
-fn append_to_parent(nodes: &mut Vec<NodeRef>, node: NodeRef) {
-  if let Some(parent) = nodes.last_mut() {
-    parent.borrow_mut().children.push(node);
+fn add_child<'a>(nodes: &mut Vec<NodeRef<'a>>, child: NodeRef<'a>, push: bool) {
+  if let Some(last) = nodes.last() {
+    last.borrow_mut().push(child.clone());
+  }
+
+  if push {
+    nodes.push(child)
   }
 }
 
-fn parse_tokens(tokens: &mut dyn Iterator<Item = Token>, nodes: &mut Vec<NodeRef>, in_fence: bool) {
-  let mut inline: Option<NodeRef> = None;
-  let mut fence: Option<String> = None;
-  let mut thead = false;
+fn parent_kind(nodes: &[NodeRef], kind: Type) -> bool {
+  nodes
+    .last()
+    .map(|x| x.borrow().kind == kind)
+    .unwrap_or(false)
+}
 
-  for token in tokens {
-    // Concatenate text nodes for fence
-    if let (
-      Token::Append {
-        kind: Type::Text,
-        attributes: Some(attrs),
-      },
-      Some(content),
-    ) = (&token, &mut fence)
-    {
-      if let Some(Value::String(value)) = attrs.get("content") {
-        content.push_str(value);
+fn event_type(event: &Event) -> Type {
+  match event {
+    Event::End(tag) | Event::Start(tag) => match tag {
+      EventTag::Paragraph => Type::Paragraph,
+      EventTag::Heading(..) => Type::Heading,
+      EventTag::BlockQuote => Type::Blockquote,
+      EventTag::CodeBlock(..) => Type::Fence,
+      EventTag::List(..) => Type::List,
+      EventTag::Item => Type::Item,
+      EventTag::Table(..) => Type::Table,
+      EventTag::TableHead => Type::TableHead,
+      EventTag::TableRow => Type::TableRow,
+      EventTag::TableCell => Type::TableCell,
+      EventTag::Emphasis => Type::Emphasis,
+      EventTag::Strong => Type::Strong,
+      EventTag::Strikethrough => Type::Strike,
+      EventTag::Link(..) => Type::Link,
+      EventTag::Image(..) => Type::Image,
+      _ => Type::Nop,
+    },
+    Event::Text(..) => Type::Text,
+    Event::Code(..) => Type::Code,
+    Event::SoftBreak => Type::SoftBreak,
+    Event::HardBreak => Type::HardBreak,
+    Event::Rule => Type::Rule,
+    Event::MarkdocTag(_, inline) => Type::Tag(*inline),
+    _ => Type::Nop,
+  }
+}
+
+pub fn convert_events<'a>(
+  input: &'a str,
+  nodes: &mut Vec<NodeRef<'a>>,
+  events: Events<'a>,
+  offset: usize,
+  add_inlines: bool,
+) {
+  let mut last_inline: Option<NodeRef> = None;
+  let mut inside_thead = false;
+  let mut inside_fence = false;
+
+  for (event, range) in events {
+    let kind = event_type(&event);
+    let offset_range = range.start + offset..range.end + offset;
+
+    if inside_fence {
+      if let Event::End(EventTag::CodeBlock(..)) = &event {
+        inside_fence = false;
+        nodes.pop();
       }
+
       continue;
     }
 
-    // todo(compat): Combine successive text nodes 
-    if let Some(parent) = nodes.last() {
-      if let Some(last) = parent.borrow().children.last() {
-        let mut node = last.borrow_mut();
-
-        if let (
-          Node {
-            kind: Type::Text,
-            attributes: Some(existing_attrs),
-            ..
-          },
-          Token::Append {
-            kind: Type::Text,
-            attributes: Some(new_attrs),
-          },
-        ) = (&*node, &token)
-        {
-          if let (Some(Value::String(existing_content)), Some(Value::String(new_content))) =
-            (existing_attrs.get("content"), new_attrs.get("content"))
-          {
-            if new_content != " " {
-              let updated_content = format!("{}{}", existing_content, new_content);
-              node.set_attribute("content", updated_content.into());
-              continue;
-            }
-          }
+    if add_inlines {
+      if last_inline.is_none() && kind.is_inline() {
+        let inline_node = mdnode!(Type::Inline, None);
+        if let Some(parent) = nodes.last_mut() {
+          last_inline = Some(parent.clone());
         }
+
+        add_child(nodes, inline_node, true);
+      }
+
+      if last_inline.is_some() && !kind.is_inline() && parent_kind(nodes, Type::Inline) {
+        last_inline = None;
+        nodes.pop();
       }
     }
 
-    if !in_fence { // todo(compat): remove fence condition
-      // When adding an inline node, insert an inline-type block node if one isn't already present
-      if token.is_inline() && inline.is_none() {
-        let inline_node: NodeRef = Node::new(Type::Inline, None).into();
-        if let Some(parent) = nodes.last_mut() {
-          inline = Some(parent.clone());
-          parent.borrow_mut().children.push(inline_node.clone());
-        }
-        nodes.push(inline_node);
+    match event {
+      Event::Text(text) | Event::Code(text) => {
+        add_child(nodes, mdnode!(kind, offset_range, content = text), false);
       }
 
-      if let Some(parent) = nodes.last() {
-        if !token.is_inline() && inline.is_some() && parent.borrow().kind == Type::Inline {
-          inline = None;
+      Event::SoftBreak | Event::HardBreak => {
+        add_child(nodes, mdnode!(kind, offset_range), false);
+      }
+
+      Event::MarkdocTag(_, inline) => {
+        let tag = tag::parse(&input[range.clone()]);
+        let push = matches!(&tag, Tag::Open(..));
+
+        match tag {
+          Tag::Open(name, attributes) | Tag::Standalone(name, attributes) => {
+            let node = mdnode!(Type::Tag(inline), offset_range, attributes);
+            node.borrow_mut().tag = Some(name.into());
+            add_child(nodes, node, push);
+          }
+
+          Tag::Close(name) => {
+            if nodes
+              .last()
+              .and_then(|x| x.borrow().tag.as_ref().map(|x| x.deref() == name))
+              .unwrap_or(false)
+            {
+              nodes.pop();
+              continue;
+            }
+
+            let error = Error {
+              id: "missing-opening",
+              level: ErrorLevel::Critical,
+              message: format!("Tag '{}' is missing opening", name),
+              location: Some(offset_range.clone()),
+            };
+
+            let node = Node {
+              kind: Type::Tag(inline),
+              tag: Some(name.into()),
+              location: Some(offset_range),
+              errors: vec![error].into(),
+              ..Node::default()
+            };
+
+            add_child(nodes, node.into(), false);
+          }
+
+          Tag::Annotation(attributes) => {
+            if let Some(node) = &last_inline {
+              node.borrow_mut().set_attributes(attributes);
+            }
+          }
+
+          Tag::Value(variable) => {
+            let node = mdnode!(Type::Text, offset_range, content = variable);
+            add_child(nodes, node, false);
+          }
+
+          Tag::Error(error) => {
+            let err = Error {
+              id: "syntax-error",
+              level: ErrorLevel::Critical,
+              message: format!("{}", error),
+              location: Some(offset_range.clone()),
+            };
+
+            let node = Node {
+              kind: Type::Error,
+              location: Some(offset_range),
+              errors: vec![err].into(),
+              ..Node::default()
+            };
+
+            add_child(nodes, node.into(), false);
+          }
+        };
+      }
+
+      Event::Start(tag) => match tag {
+        EventTag::Heading(level, ..) => {
+          let node = mdnode!(kind, offset_range, level = level as i32);
+          add_child(nodes, node, true);
+        }
+
+        EventTag::List(ordered) => {
+          let attrs = match ordered {
+            Some(n) => mdattrs!(ordered = true, number = n as i32),
+            None => mdattrs!(ordered = false),
+          };
+
+          add_child(nodes, mdnode!(kind, offset_range, attrs), true);
+        }
+
+        EventTag::Link(_, link, title) => {
+          let attrs = if title.is_empty() {
+            mdattrs!(href = link)
+          } else {
+            mdattrs!(href = link, title = title)
+          };
+
+          add_child(nodes, mdnode!(kind, offset_range, attrs), true);
+        }
+
+        EventTag::Image(_, link, title) => {
+          let attrs = if title.is_empty() {
+            mdattrs!(src = link)
+          } else {
+            mdattrs!(src = link, title = title)
+          };
+
+          add_child(nodes, mdnode!(kind, offset_range, attrs), true);
+        }
+
+        EventTag::CodeBlock(CodeBlockKind::Fenced(info)) => {
+          let mut content = &input[range.clone()];
+          let mut attributes = Attributes::new();
+
+          if let (Some(start), Some(end)) = (content.find('\n'), content.rfind('\n')) {
+            if let Some(lang) = info.split_ascii_whitespace().next() {
+              attributes.insert("language".into(), Value::from(lang.to_owned()));
+            }
+
+            if let Some(tag_start) = content[0..start].find("{%") {
+              if let Some(end) = scan_markdoc_tag_end(content[tag_start..start].as_bytes()) {
+                if let Tag::Annotation(attrs) = tag::parse(&content[tag_start..(tag_start + end)]) {
+                  attributes.extend(attrs);
+                }
+              }
+            }
+
+            content = &content[start..=end];
+            inside_fence = true;
+            attributes.insert("content".into(), Value::from(content));
+
+            let node = mdnode!(kind, offset_range.clone(), attributes);
+            let events = template::parse(content);
+            add_child(nodes, node.clone(), true);
+            convert_events(content, nodes, events, offset + range.start + start, false);
+          };
+        }
+
+        EventTag::TableHead => {
+          inside_thead = true;
+          add_child(nodes, mdnode!(Type::TableHead, offset_range.clone()), true);
+          add_child(nodes, mdnode!(Type::TableRow, offset_range), true);
+        }
+
+        EventTag::TableCell => {
+          let kind = if inside_thead {
+            Type::TableHeadCell
+          } else {
+            Type::TableCell
+          };
+
+          add_child(nodes, mdnode!(kind, offset_range), true);
+        }
+
+        _ => {
+          add_child(nodes, mdnode!(kind, offset_range), true);
+        }
+      },
+
+      Event::End(tag) => {
+        if matches!(tag, EventTag::Table(..)) && parent_kind(nodes, Type::TableBody) {
           nodes.pop();
         }
-      }
-    }
 
-    match token {
-      // Parse tags inside of fenced code block
-      Token::Close { kind: Type::Fence } => {
-        if let Some(content) = fence {
-          parse_tokens(&mut template::parse(&content).into_iter(), nodes, true);
-          if let Some(parent) = nodes.pop() {
-            parent.borrow_mut().set_attribute("content", content.into());
-          }
-        }
-
-        fence = None;
-      }
-
-      // Table normalization logic
-      Token::Open {
-        kind: Type::TableHead,
-        attributes,
-      } => {
-        thead = true;
-
-        let node: NodeRef = Node::new(Type::TableHead, attributes).into();
-        append_to_parent(nodes, node.clone());
-        nodes.push(node);
-
-        let node: NodeRef = Node::new(Type::TableRow, None).into();
-        append_to_parent(nodes, node.clone());
-        nodes.push(node);
-      }
-
-      Token::Close {
-        kind: Type::TableHead,
-      } => {
-        thead = false;
-        nodes.pop();
         nodes.pop();
 
-        let node: NodeRef = Node::new(Type::TableBody, None).into();
-        append_to_parent(nodes, node.clone());
-        nodes.push(node);
-      }
-
-      Token::Close { kind: Type::Table } => {
-        nodes.pop();
-        nodes.pop();
-      }
-
-      Token::Open {
-        kind: Type::TableCell,
-        attributes,
-      } => {
-        let kind = if thead {
-          Type::TableHeadCell
-        } else {
-          Type::TableCell
-        };
-
-        let node: NodeRef = Node::new(kind, attributes).into();
-        append_to_parent(nodes, node.clone());
-        nodes.push(node);
-      }
-
-      Token::Close {
-        kind: Type::TableCell,
-      } => {
-        let kind = if thead {
-          Type::TableHeadCell
-        } else {
-          Type::TableCell
-        };
-
-        if let Some(parent) = nodes.last() {
-          if parent.borrow().kind == kind {
-            nodes.pop();
-          }
+        if matches!(tag, EventTag::TableHead) {
+          inside_thead = false;
+          let node = mdnode!(Type::TableBody, None);
+          add_child(nodes, node.clone(), true);
         }
       }
 
-      // Standard token handlers
-      Token::Open { kind, attributes } => {
-        if kind == Type::Fence {
-          fence = Some(String::new());
-        }
-
-        let node: NodeRef = Node::new(kind, attributes).into();
-        append_to_parent(nodes, node.clone());
-        nodes.push(node);
-      }
-
-      Token::Close { kind } => {
-        if let Some(parent) = nodes.last() {
-          if parent.borrow().kind == kind {
-            nodes.pop();
-          }
-        }
-      }
-
-      Token::Append { kind, attributes } => {
-        // Ignore empty tokens
-        if let Some(attrs) = &attributes {
-          if let Some(Value::String(content)) = attrs.get("content") {
-            if content.is_empty() {
-              continue;
-            }
-          }
-        }
-
-        let node = Node::new(kind, attributes);
-        append_to_parent(nodes, node.into());
-      }
-
-      Token::Annotate { attributes } => {
-        if let (Some(node), Some(attributes)) = (&inline, attributes) {
-          node.borrow_mut().set_attributes(attributes);
-        }
-      }
+      Event::Rule => add_child(nodes, mdnode!(Type::Rule, range), false),
 
       _ => (),
     }
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use pretty_assertions::assert_eq;
-
-  #[test]
-  fn fence_with_info_string() {
-    let output = parse("```javascript {% foo=2 %}\nThis is a test\n```");
-
-    assert_eq!(
-      output,
-      Node {
-        kind: Type::Document,
-        attributes: None,
-        children: vec![Node {
-          kind: Type::Fence,
-          attributes: Some(
-            [
-              ("foo".into(), 2.into()),
-              ("content".into(), "This is a test\n".into()),
-              ("language".into(), "javascript".into()),
-            ]
-            .into()
-          ),
-          children: vec![Node {
-            kind: Type::Text,
-            attributes: Some([("content".into(), "This is a test\n".into())].into()),
-            children: vec![]
-          }
-          .into()]
-        }
-        .into()]
-      }
-      .into()
-    )
-  }
-
-  #[test]
-  fn basic_parse() {
-    let output = parse("# Heading");
-    assert_eq!(
-      output,
-      Node {
-        kind: Type::Document,
-        attributes: None,
-        children: vec![Node {
-          kind: Type::Heading,
-          attributes: Some([("level".into(), 1.into())].into()),
-          children: vec![Node {
-            kind: Type::Inline,
-            attributes: None,
-            children: vec![Node {
-              kind: Type::Text,
-              attributes: Some([("content".into(), "Heading".into())].into()),
-              children: vec![]
-            }
-            .into()]
-          }
-          .into()]
-        }
-        .into()]
-      }
-      .into()
-    )
-  }
-
-  #[test]
-  fn parse_heading_with_annotation() {
-    let output = parse("# Heading {% foo=true %}");
-    assert_eq!(
-      output,
-      Node {
-        kind: Type::Document,
-        attributes: None,
-        children: vec![Node {
-          kind: Type::Heading,
-          attributes: Some([("level".into(), 1.into()), ("foo".into(), true.into())].into()),
-          children: vec![Node {
-            kind: Type::Inline,
-            attributes: None,
-            children: vec![Node {
-              kind: Type::Text,
-              attributes: Some([("content".into(), "Heading ".into())].into()),
-              children: vec![]
-            }
-            .into()]
-          }
-          .into()]
-        }
-        .into()]
-      }
-      .into()
-    )
   }
 }
