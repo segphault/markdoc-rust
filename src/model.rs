@@ -220,7 +220,7 @@ impl<'a> Serialize for Node<'a> {
   where
     S: Serializer,
   {
-    let mut field_count = 6;
+    let mut field_count = 7;
     if let Type::Tag { .. } = &self.kind {
       field_count += 1;
     }
@@ -241,6 +241,12 @@ impl<'a> Serialize for Node<'a> {
       state.serialize_field("children", &children)?;
     } else {
       state.serialize_field("children", &Vec::<NodeRef<'a>>::new())?;
+    }
+
+    if let Some(errors) = &self.errors {
+      state.serialize_field("errors", &errors)?;
+    } else {
+      state.serialize_field("errors", &Vec::<Error>::new())?;
     }
 
     if let Some(attrs) = &self.attributes {

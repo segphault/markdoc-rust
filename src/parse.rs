@@ -1,6 +1,6 @@
 use crate::model::*;
+use crate::tag;
 use crate::tokenize::{tokenize, Events};
-use crate::{tag, template};
 use pulldown_cmark::{scan_markdoc_tag_end, CodeBlockKind, Event, Tag as EventTag};
 use std::ops::Deref;
 use tag::Tag;
@@ -31,7 +31,7 @@ pub fn parse(input: &str) -> NodeRef {
 
   let events = tokenize(source);
   let mut nodes = vec![root.clone()];
-  convert_events(source, &mut nodes, events.collect(), offset, true);
+  convert_events(source, &mut nodes, events.collect(), offset);
   root
 }
 
@@ -87,39 +87,26 @@ pub fn convert_events<'a>(
   nodes: &mut Vec<NodeRef<'a>>,
   events: Events<'a>,
   offset: usize,
-  add_inlines: bool,
 ) {
   let mut last_inline: Option<NodeRef> = None;
   let mut inside_thead = false;
-  let mut inside_fence = false;
 
   for (event, range) in events {
     let kind = event_type(&event);
     let offset_range = range.start + offset..range.end + offset;
 
-    if inside_fence {
-      if let Event::End(EventTag::CodeBlock(..)) = &event {
-        inside_fence = false;
-        nodes.pop();
+    if last_inline.is_none() && kind.is_inline() {
+      let inline_node = mdnode!(Type::Inline, None);
+      if let Some(parent) = nodes.last_mut() {
+        last_inline = Some(parent.clone());
       }
 
-      continue;
+      add_child(nodes, inline_node, true);
     }
 
-    if add_inlines {
-      if last_inline.is_none() && kind.is_inline() {
-        let inline_node = mdnode!(Type::Inline, None);
-        if let Some(parent) = nodes.last_mut() {
-          last_inline = Some(parent.clone());
-        }
-
-        add_child(nodes, inline_node, true);
-      }
-
-      if last_inline.is_some() && !kind.is_inline() && parent_kind(nodes, Type::Inline) {
-        last_inline = None;
-        nodes.pop();
-      }
+    if last_inline.is_some() && !kind.is_inline() && parent_kind(nodes, Type::Inline) {
+      last_inline = None;
+      nodes.pop();
     }
 
     match event {
@@ -237,12 +224,14 @@ pub fn convert_events<'a>(
         }
 
         EventTag::CodeBlock(CodeBlockKind::Fenced(info)) => {
-          let mut content = &input[range.clone()];
+          let content = &input[range.clone()];
           let mut attributes = Attributes::new();
 
-          if let (Some(start), Some(end)) = (content.find('\n'), content.rfind('\n')) {
+          if let (Some(start), Some(_end)) = (content.find('\n'), content.rfind('\n')) {
             if let Some(lang) = info.split_ascii_whitespace().next() {
-              attributes.insert("language".into(), Value::from(lang.to_owned()));
+              if !lang.trim().starts_with("{%") {
+                attributes.insert("language".into(), Value::from(lang.to_owned()));
+              }
             }
 
             if let Some(tag_start) = content[0..start].find("{%") {
@@ -253,14 +242,7 @@ pub fn convert_events<'a>(
               }
             }
 
-            content = &content[start..=end];
-            inside_fence = true;
-            attributes.insert("content".into(), Value::from(content));
-
-            let node = mdnode!(kind, offset_range.clone(), attributes);
-            let events = template::parse(content);
-            add_child(nodes, node.clone(), true);
-            convert_events(content, nodes, events, offset + range.start + start, false);
+            add_child(nodes, mdnode!(kind, offset_range, attributes), true);
           };
         }
 
@@ -285,18 +267,21 @@ pub fn convert_events<'a>(
         }
       },
 
+      Event::End(EventTag::TableHead) => {
+        nodes.pop();
+        nodes.pop();
+
+        inside_thead = false;
+        let node = mdnode!(Type::TableBody, None);
+        add_child(nodes, node.clone(), true);
+      }
+
       Event::End(tag) => {
-        if matches!(tag, EventTag::Table(..)) && parent_kind(nodes, Type::TableBody) {
+        if matches!(tag, EventTag::Table(..)) {
           nodes.pop();
         }
 
         nodes.pop();
-
-        if matches!(tag, EventTag::TableHead) {
-          inside_thead = false;
-          let node = mdnode!(Type::TableBody, None);
-          add_child(nodes, node.clone(), true);
-        }
       }
 
       Event::Rule => add_child(nodes, mdnode!(Type::Rule, range), false),

@@ -94,6 +94,7 @@ ValueHash = {
   )? ~
   Space* ~
   ","? ~
+  Space* ~
   "}"
 }
 

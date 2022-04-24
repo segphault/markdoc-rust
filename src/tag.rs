@@ -247,7 +247,7 @@ mod tests {
 
     assert_eq!(
       convert_value(pair),
-      mdvalue!({"foo": "bar", "baz": true})
+      mdattrs!(foo="bar", baz=true).into()
     )
   }
 
@@ -288,9 +288,11 @@ mod tests {
       .next()
       .unwrap();
 
+    
+
     assert_eq!(
       convert_attributes(pair),
-      mdattrs!(asdf=1, id="foo", class={"bar": true, "baz": true})
+      mdattrs!(asdf=1, id="foo", class=mdattrs!(bar=true, baz=true))
     )
   }
 

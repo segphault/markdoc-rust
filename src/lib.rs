@@ -8,6 +8,5 @@ extern crate pest;
 pub mod macros;
 pub mod model;
 pub mod tag;
-pub mod template;
 pub mod tokenize;
 pub mod parse;
