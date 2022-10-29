@@ -10,3 +10,6 @@ pub mod model;
 pub mod tag;
 pub mod tokenize;
 pub mod parse;
+pub mod transform;
+pub mod schema;
+pub mod render;

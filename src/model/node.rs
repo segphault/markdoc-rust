@@ -1,92 +1,14 @@
-use std::ops::Range;
+use super::value::Value;
+use super::Attributes;
 use pulldown_cmark::CowStr;
 use serde::ser::{SerializeMap, SerializeStruct};
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ops::Range;
 use std::rc::Rc;
 
-pub type Attributes<'a> = HashMap<CowStr<'a>, Value<'a>>;
-
-#[derive(PartialEq, Clone, Debug, Serialize)]
-#[serde(untagged)]
-pub enum Value<'a> {
-  Hash(Attributes<'a>),
-  Array(Vec<Value<'a>>),
-  String(CowStr<'a>),
-  Number(f64),
-  Boolean(bool),
-  #[serde(serialize_with = "serialize_variable")]
-  Variable(char, Vec<Value<'a>>),
-  #[serde(serialize_with = "serialize_function")]
-  Function(CowStr<'a>, Attributes<'a>),
-  Null,
-}
-
-impl<'a> From<&'a str> for Value<'a> {
-  fn from(value: &'a str) -> Value<'a> {
-    Value::String(value.into())
-  }
-}
-
-impl<'a> From<CowStr<'a>> for Value<'a> {
-  fn from(value: CowStr<'a>) -> Value<'a> {
-    Value::String(value)
-  }
-}
-
-impl<'a> From<String> for Value<'a> {
-  fn from(value: String) -> Value<'a> {
-    Value::String(value.into())
-  }
-}
-
-impl<'a> From<bool> for Value<'a> {
-  fn from(value: bool) -> Value<'a> {
-    Value::Boolean(value)
-  }
-}
-
-impl<'a> From<i32> for Value<'a> {
-  fn from(value: i32) -> Value<'a> {
-    Value::Number(value.into())
-  }
-}
-
-impl<'a> From<Vec<Value<'a>>> for Value<'a> {
-  fn from(value: Vec<Value>) -> Value {
-    Value::Array(value)
-  }
-}
-
-impl<'a> From<Attributes<'a>> for Value<'a> {
-  fn from(value: Attributes) -> Value {
-    Value::Hash(value)
-  }
-}
-
-fn serialize_variable<S>(_ch: &char, path: &[Value], s: S) -> Result<S::Ok, S::Error>
-where
-  S: Serializer,
-{
-  let mut map = s.serialize_map(Some(3))?;
-  map.serialize_entry("$$mdtype", "Variable")?;
-  map.serialize_entry("path", &path)?;
-  map.end()
-}
-
-fn serialize_function<S>(name: &str, attrs: &Attributes, s: S) -> Result<S::Ok, S::Error>
-where
-  S: Serializer,
-{
-  let mut map = s.serialize_map(Some(3))?;
-  map.serialize_entry("$$mdtype", "Function")?;
-  map.serialize_entry("name", &name)?;
-  map.serialize_entry("parameters", &attrs)?;
-  map.end()
-}
-
-#[derive(Clone, PartialEq, Debug, Serialize)]
+#[derive(Clone, Hash, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Type {
   Document,
@@ -122,7 +44,7 @@ pub enum Type {
   Rule,
   Nop,
   Error,
-  Tag(bool)
+  Tag(bool),
 }
 
 impl<'a> Default for Type {
@@ -154,7 +76,7 @@ pub enum ErrorLevel {
   Info,
   Warning,
   Error,
-  Critical
+  Critical,
 }
 
 #[derive(PartialEq, Debug, Serialize)]
@@ -162,7 +84,7 @@ pub struct Error {
   pub id: &'static str,
   pub level: ErrorLevel,
   pub message: String,
-  pub location: Option<Range<usize>>
+  pub location: Option<Range<usize>>,
 }
 
 #[derive(PartialEq, Debug, Default)]
@@ -172,7 +94,7 @@ pub struct Node<'a> {
   pub attributes: Option<Attributes<'a>>,
   pub children: Option<Vec<NodeRef<'a>>>,
   pub location: Option<Range<usize>>,
-  pub errors: Option<Vec<Error>>
+  pub errors: Option<Vec<Error>>,
 }
 
 impl<'a> Node<'a> {
@@ -184,7 +106,7 @@ impl<'a> Node<'a> {
     }
   }
 
-  pub fn attribute(&self, key: &str) -> Option<&Value> {
+  pub fn attribute(&self, key: &str) -> Option<&Value<'a>> {
     self.attributes.as_ref().and_then(|x| x.get(key))
   }
 

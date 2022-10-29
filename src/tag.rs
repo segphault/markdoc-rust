@@ -1,8 +1,8 @@
-use pulldown_cmark::CowStr;
-use crate::model::{Attributes, Value};
+use crate::model::{Attributes, value::Value};
 use pest::error::Error;
 use pest::iterators::Pair;
 use pest::{Parser, RuleType};
+use pulldown_cmark::CowStr;
 
 #[derive(Parser)]
 #[grammar = "tag.pest"]
@@ -21,7 +21,7 @@ pub enum Tag<'a, R: RuleType> {
 pub fn parse(input: &str) -> Tag<Rule> {
   match TagParser::parse(Rule::Top, input) {
     Ok(mut pair) => convert_tag(pair.next().unwrap()),
-    Err(err) => Tag::Error(err)
+    Err(err) => Tag::Error(err),
   }
 }
 
@@ -247,7 +247,7 @@ mod tests {
 
     assert_eq!(
       convert_value(pair),
-      mdattrs!(foo="bar", baz=true).into()
+      mdattrs!(foo = "bar", baz = true).into()
     )
   }
 
@@ -288,11 +288,13 @@ mod tests {
       .next()
       .unwrap();
 
-    
-
     assert_eq!(
       convert_attributes(pair),
-      mdattrs!(asdf=1, id="foo", class=mdattrs!(bar=true, baz=true))
+      mdattrs!(
+        asdf = 1,
+        id = "foo",
+        class = mdattrs!(bar = true, baz = true)
+      )
     )
   }
 

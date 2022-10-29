@@ -1,3 +1,5 @@
+use crate::model::node::*;
+use crate::model::value::*;
 use crate::model::*;
 use crate::tag;
 use crate::tokenize::{tokenize, Events};
