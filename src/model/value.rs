@@ -1,9 +1,12 @@
 use super::Attributes;
 use pulldown_cmark::CowStr;
-use serde::ser::{SerializeMap, SerializeStruct};
+use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
+use std::cell::RefCell;
 use std::fmt;
+use std::rc::Rc;
 
+pub type ValueRef<'a> = Rc<RefCell<Value<'a>>>;
 #[derive(PartialEq, Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum Value<'a> {
@@ -12,11 +15,28 @@ pub enum Value<'a> {
   String(CowStr<'a>),
   Number(f64),
   Boolean(bool),
-  #[serde(serialize_with = "serialize_variable")]
-  Variable(char, Vec<Value<'a>>),
-  #[serde(serialize_with = "serialize_function")]
-  Function(CowStr<'a>, Attributes<'a>),
+  Expression(ValueRef<'a>, Expression<'a>),
+  Undefined,
   Null,
+}
+
+impl<'a> Value<'a> {
+  pub fn resolved<T>(&self, f: fn (&Value<'a>) -> T) -> T {
+    match self {
+      Value::Expression(value, _) => f(&value.borrow()),
+      _ => f(self)
+    }
+  }
+
+  pub fn deep_get(&'a self, path: &[Value<'a>]) -> Option<&'a Value<'a>> {
+    path
+      .into_iter()
+      .fold(Some(self), |cur, iter| match (cur, iter) {
+        (Some(Value::Hash(items)), Value::String(key)) => items.get(key),
+        (Some(Value::Array(items)), Value::Number(idx)) => items.get(*idx as usize),
+        _ => None,
+      })
+  }
 }
 
 impl<'a> From<&'a str> for Value<'a> {
@@ -61,15 +81,31 @@ impl<'a> From<Attributes<'a>> for Value<'a> {
   }
 }
 
+impl<'a> From<Expression<'a>> for Value<'a> {
+  fn from(value: Expression) -> Value {
+    Value::Expression(Rc::new(RefCell::new(Value::Undefined)), value)
+  }
+}
+
 impl<'a> fmt::Display for Value<'a> {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     match self {
       Value::String(value) => write!(f, "{}", value),
       Value::Number(value) => write!(f, "{}", value),
       Value::Boolean(value) => write!(f, "{}", value),
-      _ => write!(f, "[OBJECT]")
+      Value::Expression(value, _) => write!(f, "{}", value.borrow_mut()),
+      _ => write!(f, "[OBJECT]"),
     }
   }
+}
+
+#[derive(PartialEq, Clone, Debug, Serialize)]
+#[serde(untagged)]
+pub enum Expression<'a> {
+  #[serde(serialize_with = "serialize_variable")]
+  Variable(char, Vec<Value<'a>>),
+  #[serde(serialize_with = "serialize_function")]
+  Function(CowStr<'a>, Attributes<'a>),
 }
 
 fn serialize_variable<S>(_ch: &char, path: &[Value], s: S) -> Result<S::Ok, S::Error>

@@ -1,4 +1,8 @@
-use crate::model::{Attributes, value::Value};
+use crate::model::{
+  value::{Expression, Value},
+  Attributes,
+};
+
 use pest::error::Error;
 use pest::iterators::Pair;
 use pest::{Parser, RuleType};
@@ -79,7 +83,7 @@ fn convert_function(pair: Pair<Rule>) -> Value {
     })
     .collect();
 
-  Value::Function(name.into(), attrs)
+  Expression::Function(name.into(), attrs).into()
 }
 
 fn convert_attributes(pair: Pair<Rule>) -> Attributes {
@@ -111,10 +115,11 @@ fn convert_attributes(pair: Pair<Rule>) -> Attributes {
 
 fn convert_value(pair: Pair<Rule>) -> Value {
   match pair.as_rule() {
-    Rule::Variable => Value::Variable(
+    Rule::Variable => Expression::Variable(
       pair.as_str().chars().next().unwrap(),
       pair.into_inner().map(convert_value).collect(),
-    ),
+    )
+    .into(),
     Rule::Function => convert_function(pair),
     Rule::ValueNull => Value::Null,
     Rule::Identifier | Rule::ValueString => pair.as_str().into(),
@@ -165,7 +170,13 @@ mod tests {
       output,
       Tag::Open(
         "foo",
-        Some([("primary".into(), Value::Variable('$', vec!["bar".into()]))].into())
+        Some(
+          [(
+            "primary".into(),
+            Expression::Variable('$', vec!["bar".into()]).into()
+          )]
+          .into()
+        )
       )
     )
   }
@@ -179,7 +190,10 @@ mod tests {
         "foo",
         Some(
           [
-            ("primary".into(), Value::Variable('$', vec!["bar".into()])),
+            (
+              "primary".into(),
+              Expression::Variable('$', vec!["bar".into()]).into()
+            ),
             ("baz".into(), true.into())
           ]
           .into()
@@ -307,10 +321,11 @@ mod tests {
 
     assert_eq!(
       convert_value(pair),
-      Value::Variable(
+      Expression::Variable(
         '$',
         vec!["foo".into(), "bar".into(), 10.into(), "baz".into()]
       )
+      .into()
     )
   }
 
@@ -323,7 +338,7 @@ mod tests {
 
     assert_eq!(
       convert_function(pair),
-      Value::Function(
+      Expression::Function(
         "foo".into(),
         [
           ("0".into(), 1.into()),
@@ -332,6 +347,7 @@ mod tests {
         ]
         .into()
       )
+      .into()
     )
   }
 
@@ -345,10 +361,15 @@ mod tests {
         Some(
           [(
             "bar".into(),
-            Value::Function(
+            Expression::Function(
               "baz".into(),
-              [("0".into(), Value::Variable('$', vec!["test".into()]))].into()
+              [(
+                "0".into(),
+                Expression::Variable('$', vec!["test".into()]).into()
+              )]
+              .into()
             )
+            .into()
           )]
           .into()
         )

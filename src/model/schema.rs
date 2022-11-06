@@ -1,8 +1,8 @@
-use super::node::*;
 use super::render::Renderable;
-use pulldown_cmark::CowStr;
+use super::Attributes;
+use super::{node::*, value::Value};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt};
+use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SchemaType {
@@ -13,7 +13,7 @@ pub enum SchemaType {
   Array,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub enum AttributeRender<'a> {
   Name(&'a str),
   True,
@@ -26,11 +26,11 @@ impl<'a> Default for AttributeRender<'a> {
   }
 }
 
-#[derive(Debug, Serialize, Default)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Attribute<'a> {
   #[serde(default)]
   pub kind: Option<SchemaType>,
-  #[serde(default)]
+  #[serde(skip)]
   pub render: AttributeRender<'a>,
   #[serde(default)]
   pub required: bool,
@@ -38,30 +38,29 @@ pub struct Attribute<'a> {
 
 pub type TransformFn<'a> = fn(&Node<'a>, &'a Config<'a>) -> Renderable<'a>;
 
-pub enum Transform<'a> {
-  Function(TransformFn<'a>),
-  Template(CowStr<'a>),
-}
-
-impl<'a> fmt::Debug for Transform<'a> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    match self {
-      Transform::Function(..) => f.write_str("[FUNCTION]"),
-      Transform::Template(..) => f.write_str("[TEMPLATE]")
-    }
-  }
-}
-
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct Schema<'a> {
   #[serde(default)]
   pub render: Option<&'a str>,
-  #[serde(skip)]
+  #[serde(default)]
   pub attributes: Option<HashMap<&'a str, Attribute<'a>>>,
   #[serde(default)]
   pub self_closing: bool,
   #[serde(skip)]
-  pub transform: Option<Transform<'a>>,
+  pub transform: Option<TransformFn<'a>>,
+}
+
+pub type EvaluateFn<'a> = fn(&Attributes<'a>, &'a Config<'a>) -> Value<'a>;
+
+pub struct FunctionSchema<'a> {
+  pub attributes: Option<HashMap<&'a str, Attribute<'a>>>,
+  pub evaluate: EvaluateFn<'a>,
+}
+
+pub type VariableFn<'a> = fn(&[Value<'a>]) -> Value<'a>;
+pub enum Variables<'a> {
+  Resolver(VariableFn<'a>),
+  Values(Attributes<'a>),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -70,4 +69,8 @@ pub struct Config<'a> {
   pub nodes: HashMap<Type, Schema<'a>>,
   #[serde(borrow)]
   pub tags: HashMap<&'a str, Schema<'a>>,
+  #[serde(skip)]
+  pub variables: Option<Variables<'a>>,
+  #[serde(skip)]
+  pub functions: Option<HashMap<&'a str, FunctionSchema<'a>>>,
 }

@@ -27,7 +27,7 @@ pub fn render<W: Write>(node: &Renderable, writer: &mut W) -> Result<(), Error> 
 
       if let Some(attrs) = attributes {
         for (key, value) in attrs {
-          write!(writer, " {}={}", key, value)?;
+          write!(writer, r#" {}="{}""#, key, value)?;
         }
       }
 
@@ -54,40 +54,69 @@ pub fn render<W: Write>(node: &Renderable, writer: &mut W) -> Result<(), Error> 
 
 #[cfg(test)]
 mod tests {
-  use std::io::BufWriter;
-
-  use crate::{
-    model::schema::Config, parse::parse, schema::default_nodes, transform::transform_node,
-  };
-
   use super::*;
+  use crate::{
+    model::schema::{Config, Variables},
+    parse::parse,
+    schema::default_nodes,
+    transform::transform_node,
+  };
+  use std::io::BufWriter;
 
   #[test]
   fn example() {
-    let config = Config {
-      tags: hash!(),
-      nodes: default_nodes(),
-    };
+    let schema = r#"
+{
+  "nodes": {},
+  "tags": {
+    "foo": {
+      "render": "foo",
+      "attributes": {
+        "bar": {"kind": "String"}
+      }
+    }
+  }
+}
+"#;
 
     let doc = parse(
       r#"
 # This is a test
 
+---
+
 This is a sample document
 
 * This is a bulleted list
 * With another list item
+
+{% foo bar="test" %}
+This is a test: {% $foo.bar %}
+{% /foo %}
 "#,
     );
 
+    let config = serde_json::from_str::<Config>(&schema).unwrap();
+
+    let config = Config {
+      tags: config.tags,
+      nodes: default_nodes(),
+      variables: Variables::Values(hash!(
+        "foo".into() => hash!(
+          "bar".into() => "variable resolved".into()
+        ).into()
+      ))
+      .into(),
+      functions: None,
+    };
+
     let parent = doc.borrow();
+    crate::resolve::resolve_node(&parent, &config);
     let rendered = transform_node(&*parent, &config);
     let mut writer = BufWriter::new(Vec::new());
-
-    dbg!(render(&rendered, &mut writer));
-
-    if let Ok(value) = std::str::from_utf8(writer.buffer()) {
-      dbg!(value);
-    }
+    render(&rendered, &mut writer).expect("completes");
+    let output = std::str::from_utf8(writer.buffer());
+    let expected = r#"<h1>This is a test</h1><hr><p>This is a sample document</p><ul><li>This is a bulleted list</li><li>With another list item</li></ul><foo bar="test"><p>This is a test: variable resolved</p></foo>"#;
+    assert_eq!(Ok(expected), output);
   }
 }

@@ -9,25 +9,23 @@ pub fn find_schema<'a>(node: &Node<'a>, config: &'a Config<'a>) -> Option<&'a Sc
 }
 
 pub fn transform_attributes<'a>(node: &Node<'a>, config: &'a Config<'a>) -> Option<Attributes<'a>> {
-  if let Some(schema) = find_schema(&node, &config) {
-    if let Some(attrs) = &schema.attributes {
-      let mut output = Attributes::new();
+  if let Some(attrs) = find_schema(&node, &config).and_then(|schema| schema.attributes.as_ref()) {
+    let mut output = Attributes::new();
 
-      for (key, attr) in attrs {
-        let name = match attr.render {
-          AttributeRender::True => key,
-          AttributeRender::Name(n) => n,
-          AttributeRender::False => continue,
-        };
+    for (key, attr) in attrs {
+      let name = match attr.render {
+        AttributeRender::True => key,
+        AttributeRender::Name(n) => n,
+        AttributeRender::False => continue,
+      };
 
-        if let Some(value) = node.attribute(*key) {
-          output.insert(name.into(), value.clone());
-        }
+      if let Some(value) = node.attribute(key) {
+        output.insert(name.into(), value.clone());
       }
+    }
 
-      if output.len() > 0 {
-        return output.into();
-      }
+    if !output.is_empty() {
+      return output.into();
     }
   }
 
@@ -50,8 +48,8 @@ pub fn transform_children<'a>(
 
 pub fn transform_node<'a>(node: &Node<'a>, config: &'a Config<'a>) -> Renderable<'a> {
   if let Some(schema) = find_schema(&node, &config) {
-    if let Some(Transform::Function(f)) = schema.transform {
-      return f(&node, &config);
+    if let Some(transform_func) = schema.transform {
+      return transform_func(&node, &config);
     }
 
     let children = transform_children(&node, &config);

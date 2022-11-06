@@ -25,11 +25,11 @@ pub fn default_nodes<'a>() -> HashMap<Type, Schema<'a>> {
           required: true,
         }
       ).into(),
-      transform: Transform::Function(|node, config| Renderable::Tag {
+      transform: Some(|node, config| Renderable::Tag {
         name: format!("h{}", node.attribute("level").unwrap()).into(),
         attributes: transform_attributes(&node, &config),
         children: transform_children(&node, &config)
-      }).into(),
+      }),
       ..Default::default()
     },
 
@@ -99,14 +99,68 @@ pub fn default_nodes<'a>() -> HashMap<Type, Schema<'a>> {
           ..Default::default()
         }
       ).into(),
-      transform: Transform::Function(|node, config| Renderable::Tag {
-        name: match node.attribute("ordered") {
-          Some(Value::Boolean(true)) => "ol",
-          _ => "ul"
-        }.into(),
+      transform: Some(|node, config| Renderable::Tag {
+        name: node.attribute("ordered").and_then(|attr| attr.resolved(|value| match value {
+          Value::Boolean(true) => Some("ol"),
+          _ => None
+        })).unwrap_or("ul").into(),
         attributes: transform_attributes(&node, &config),
         children: transform_children(&node, &config)
-      }).into(),
+      }),
+      ..Default::default()
+    },
+
+    Type::Table => Schema {
+      render: "table".into(),
+      ..Default::default()
+    },
+
+    Type::TableBody => Schema {
+      render: "tbody".into(),
+      ..Default::default()
+    },
+
+    Type::TableHead => Schema {
+      render: "thead".into(),
+      ..Default::default()
+    },
+
+    Type::TableHeadCell => Schema {
+      render: "th".into(),
+      attributes: hash!(
+        "width" => Attribute {
+          kind: Some(SchemaType::Number),
+          ..Default::default()
+        },
+        "align" => Attribute {
+          kind: Some(SchemaType::String),
+          ..Default::default()
+        },
+      ).into(),
+      ..Default::default()
+    },
+
+    Type::TableRow => Schema {
+      render: "tr".into(),
+      ..Default::default()
+    },
+
+    Type::TableCell => Schema {
+      render: "td".into(),
+      attributes: hash!(
+        "colspan" => Attribute {
+          kind: Some(SchemaType::Number),
+          ..Default::default()
+        },
+        "rowspan" => Attribute {
+          kind: Some(SchemaType::Number),
+          ..Default::default()
+        },
+        "align" => Attribute {
+          kind: Some(SchemaType::String),
+          ..Default::default()
+        }
+      ).into(),
       ..Default::default()
     },
 
@@ -135,13 +189,13 @@ pub fn default_nodes<'a>() -> HashMap<Type, Schema<'a>> {
           ..Default::default()
         }
       ).into(),
-      transform: Transform::Function(|node, config| Renderable::Tag {
+      transform: Some(|node, config| Renderable::Tag {
         name: "code".into(),
         attributes: transform_attributes(&node, &config),
         children: vec![
-          Renderable::String("asdf".into()).into()
+          Renderable::String("asdf".into()).into() // TODO
         ].into()
-      }).into(),
+      }),
       ..Default::default()
     },
 
@@ -173,13 +227,17 @@ pub fn default_nodes<'a>() -> HashMap<Type, Schema<'a>> {
           ..Default::default()
         }
       ).into(),
-      transform: Transform::Function(|node, _config| {
-        if let Some(Value::String(value)) = node.attribute("content") {
-          Renderable::String(value.clone())
-        } else {
-          Renderable::Null
-        }
-      }).into(),
+      transform: Some(|node, _config| {
+        node.attribute("content").and_then(|attr| attr.resolved(|value| match value {
+          Value::String(s) => Some(Renderable::String(s.clone())),
+          _ => None
+        })).unwrap_or(Renderable::Null)
+      }),
+      ..Default::default()
+    },
+
+    Type::Rule => Schema {
+      render: "hr".into(),
       ..Default::default()
     },
 
@@ -189,9 +247,9 @@ pub fn default_nodes<'a>() -> HashMap<Type, Schema<'a>> {
     },
 
     Type::SoftBreak => Schema {
-      transform: Transform::Function(|_node, _config|
+      transform: Some(|_node, _config|
         Renderable::String(" ".into())
-      ).into(),
+      ),
       ..Default::default()
     }
   )

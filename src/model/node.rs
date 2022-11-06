@@ -1,7 +1,7 @@
 use super::value::Value;
 use super::Attributes;
 use pulldown_cmark::CowStr;
-use serde::ser::{SerializeMap, SerializeStruct};
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use std::cell::RefCell;
 use std::collections::HashMap;
